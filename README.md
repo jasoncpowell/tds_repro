@@ -54,3 +54,14 @@ entirely; `insert_all` with an explicit `nil` key does not, and fails.
 
 The passing workaround confirms the fix direction: supply an explicitly typed
 `%Tds.Parameter{}` so the driver never has to guess.
+
+## Vendored ecto_sql
+
+`vendor/ecto_sql` is a copy of [ecto_sql](https://github.com/elixir-ecto/ecto_sql)
+3.14.0 as published on Hex (Apache-2.0, see its `LICENSE.md`), used as a path
+dependency so a fix can be developed and tested against this repro.
+
+It was committed unmodified first, and changes to it are kept in their own
+commits, so this shows exactly what would go into an upstream PR:
+
+    git log -p -- vendor/ecto_sql

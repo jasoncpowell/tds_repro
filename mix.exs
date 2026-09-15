@@ -20,7 +20,8 @@ defmodule TdsRepro.MixProject do
 
   defp deps do
     [
-      {:ecto_sql, "~> 3.13"},
+      # Vendored copy of ecto_sql 3.14.0; see "Vendored ecto_sql" in the README.
+      {:ecto_sql, path: "vendor/ecto_sql"},
       {:tds, "~> 2.3"}
     ]
   end
