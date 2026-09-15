@@ -1,5 +1,10 @@
 # Root cause
 
+Source links point at the released versions this repo uses: ecto 3.14.2,
+ecto_sql 3.14.0, and tds master at [`f67d0a7`](https://github.com/elixir-ecto/tds/tree/f67d0a7cd0)
+(the same code as tds 2.3.8 on Hex for everything referenced here). Every
+reference is also listed in [references.md](references.md).
+
 ## Symptom
 
 Writing `nil` to some columns through Ecto fails on SQL Server:
@@ -14,15 +19,30 @@ For `float`, `real`, `text` and `ntext` columns the message is different:
 ** (Tds.Error) Line 1 (Error 206): Operand type clash: varbinary is incompatible with float
 ```
 
+Both are standard SQL Server errors ([errors 0 to 999](https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-0-to-999)):
+257 is "Implicit conversion from data type %ls to %ls is not allowed" and 206 is
+"Operand type clash: %ls is incompatible with %ls". The original report in
+tds#124 also shows error 8180, "Statement(s) could not be prepared", because
+the failure happens while SQL Server prepares the statement.
+
 It happens whenever a query carries `nil` as a parameter: `Repo.update/2`
 changing a field to nil, `Repo.insert_all/3` with a nil value, or
 `Repo.update_all/3` setting a field to nil.
 
 ## Where the type gets lost
 
-SQL Server needs every query parameter declared with a type. Ecto knows each
-field's type from the schema, but on released ecto_sql that knowledge doesn't
-survive to the point where parameters are declared:
+SQL Server needs a data type for every parameter. The tds driver prepares
+statements with `sp_prepare` by default ([protocol.ex#L198](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/protocol.ex#L198),
+[#L569](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/protocol.ex#L569)),
+whose parameter definitions name each parameter's type
+([sp_prepare](https://learn.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-prepare-transact-sql),
+[sp_executesql](https://learn.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-executesql-transact-sql):
+"Each parameter definition consists of a parameter name and a data type").
+On the wire, every RPC parameter carries a `TYPE_INFO`, including a NULL one
+([MS-TDS: RPC Request](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/619c43b6-9495-4a58-9e49-a4950db245b3)).
+
+Ecto knows each field's type from the schema, but on released ecto_sql that
+knowledge doesn't survive to the point where the parameter is declared:
 
 ```mermaid
 flowchart TD
@@ -35,14 +55,26 @@ flowchart TD
   A --> B --> C --> D --> E --> F
 ```
 
-The `:binary` fallback dates from 2018, when it fixed an Ecto `has_one`
-nullify case: foreign keys are integers, and SQL Server does accept a varbinary
-NULL for integer columns. See [upstream-history.md](upstream-history.md).
+| Step | Code |
+|---|---|
+| Ecto dumps changes and query parameters through the adapter, with the field's type | [`Ecto.Type.adapter_dump/3`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L1041-L1049), called from [`Ecto.Repo.Schema`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo/schema.ex#L1365-L1366) and the [query planner](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/query/planner.ex#L2638) |
+| The Tds adapter's dumpers leave date, time and float values untouched, so nil stays nil | [`Ecto.Adapters.Tds.dumpers/2`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds.ex#L155-L157) |
+| The connection picks a parameter type from the value's struct; nil matches none and falls through with no type | [`prepare_param/1`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L102-L117), [`prepare_raw_param/1`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L146) |
+| The driver keeps an explicit type, but gives an untyped nil the type `:binary` | [`Tds.Parameter.fix_data_type/1`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L79-L88), added in [`97c736b`](https://github.com/elixir-ecto/tds/commit/97c736be2a) (2018) |
+| `:binary` is declared as varbinary | [`encode_param_descriptor/1`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L978) |
+
+The `:binary` fallback fixed an Ecto `has_one` nullify case: foreign keys are
+integers, and SQL Server does accept a varbinary NULL for integer columns.
+See [upstream-history.md](upstream-history.md).
 
 ## Why only some column types fail
 
-Whether SQL Server accepts a varbinary NULL depends on the column type.
-`mix run scripts/conversion_matrix.exs` prints the full table; in short:
+When a value is inserted into a column, SQL Server converts it to the column's
+type ([data type conversion](https://learn.microsoft.com/en-us/sql/t-sql/data-types/data-type-conversion-database-engine):
+"inserting a value into a column result[s] in the data type that was defined by
+the ... column definition"). Microsoft's conversion chart on that page is an
+image; `mix run scripts/conversion_matrix.exs` checks the cells that matter
+here against a real server. In short:
 
 | Refuses a varbinary NULL | Accepts it |
 |---|---|
@@ -50,8 +82,16 @@ Whether SQL Server accepts a varbinary NULL depends on the column type.
 | `float`, `real`, `text`, `ntext` (error 206) | `int`, `bigint`, `bit`, `decimal`, `money` |
 | | `nvarchar`, `varchar`, `uniqueidentifier`, `varbinary`, `image` |
 
-Combined with the column types Ecto's migrations create, this is which schema
-fields break on released ecto_sql:
+`text` and `image` "don't support automatic data type conversion"
+([CAST and CONVERT](https://learn.microsoft.com/en-us/sql/t-sql/functions/cast-and-convert-transact-sql#text-and-image-data-types)).
+Casting doesn't help `float` and `real` either: SQL Server rejects
+`CAST(varbinary AS float)` outright with error 529, "Explicit conversion from
+data type %ls to %ls is not allowed".
+
+Combined with the column types ecto_sql's migrations create
+([`ecto_to_db/5`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L1825-L1842)),
+this is which schema fields break on released ecto_sql
+([Ecto primitive types](https://ecto.hexdocs.pm/Ecto.Schema.html#module-primitive-types)):
 
 | Ecto field type | Column Ecto creates | Setting it to nil |
 |---|---|---|
@@ -65,8 +105,10 @@ fields break on released ecto_sql:
 | `:float` | `float` | fails |
 | `:integer`, `:boolean`, `:decimal`, `:string`, `:binary`, `:binary_id`, `:map` | `int`, `bit`, `decimal`, `nvarchar`, `varbinary`, `uniqueidentifier`, `nvarchar(max)` | works |
 
-`timestamps()` uses `:naive_datetime` by default, which maps to the legacy
-`datetime` type. That is a large part of why the bug is easy to miss.
+`timestamps()` uses `:naive_datetime` by default
+([`timestamps/1`](https://ecto.hexdocs.pm/Ecto.Schema.html#timestamps/1)),
+which maps to the legacy `datetime` type. That is a large part of why the bug is
+easy to miss.
 
 Columns created by hand or by other tools follow the first table instead. For
 example, a `:string` field on a legacy `text` column also fails, and so does a
@@ -74,25 +116,46 @@ example, a `:string` field on a legacy `text` column also fails, and so does a
 
 ## Why plain inserts don't fail
 
-`Repo.insert/2` only includes struct fields that aren't nil, so no parameter
-is sent for them and the column gets its default of NULL. Only writes that
-explicitly carry a nil hit the bug.
+`Repo.insert/2` converts a struct "into a changeset with all non-nil fields"
+([`insert/2`](https://ecto.hexdocs.pm/Ecto.Repo.html#c:insert/2),
+[relation.ex#L647](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/changeset/relation.ex#L647-L649)),
+so no parameter is sent for nil fields and the column gets its default of NULL.
+Only writes that explicitly carry a nil hit the bug.
 
 ## Why the driver can't fix it
 
-By the time a nil reaches the tds driver it is just `nil`, with no type. Any
-fallback type breaks some column: `:binary` (today) breaks the columns above,
-and `:string`, proposed in tds#162, breaks `binary` and `varbinary` columns.
-The conversion matrix shows both.
+By the time a nil reaches the tds driver it is just `nil`, with no type. TDS
+encodes NULL differently depending on the declared type: a 2-byte marker for
+`varchar`/`nvarchar`/`varbinary`, a 4-byte marker for `text`/`ntext`/`image`, and
+another form for everything else
+([MS-TDS: Data Type Dependent Data Streams](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/3f983fde-0509-485a-8c40-a9fa6679a828)).
+So the driver has to pick some type, and every choice is refused by some
+column: `:binary` (today) breaks the columns above, and `:string`, proposed in
+tds#162, breaks `binary`, `varbinary` and `image` columns. The conversion
+matrix shows both.
+
+## Why the adapter can fix it
+
+Until Ecto 3.11, `Ecto.Type.adapter_dump/3` returned early for nil, so an
+adapter's dumpers never saw one. [ecto#4214](https://github.com/elixir-ecto/ecto/pull/4214)
+removed that shortcut ("Adapters now receive `nil` for encoding/decoding",
+Ecto 3.11.0), and ecto_sql adjusted the Tds loaders for it the same day
+([ecto_sql#528](https://github.com/elixir-ecto/ecto_sql/pull/528)). Since
+then, `Ecto.Adapters.Tds.dumpers/2` runs for nil values with the field's type
+in hand, which is exactly the information the driver lacks.
+
+The [`dumpers/2` callback](https://ecto.hexdocs.pm/Ecto.Adapter.html#c:dumpers/2)
+"returns a list of dumpers with the given type usually at the beginning", and
+its own example appends a function that re-encodes values for the database.
 
 ## The fix
 
-`Ecto.Adapters.Tds.dumpers/2` is the last point where the field's type is
-known. The fix (commit `4d570f4`, in
+The fix (commit `4d570f4`, in
 [`vendor/ecto_sql/lib/ecto/adapters/tds.ex`](../vendor/ecto_sql/lib/ecto/adapters/tds.ex)) wraps
 nil for the affected Ecto types in a `%Tds.Parameter{}` with an explicit type.
-The adapter passes typed parameters straight through, and the driver only
-falls back to `:binary` when there is no type.
+The adapter already passes typed parameters straight through
+([connection.ex#L123](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L123)),
+and the driver only falls back to `:binary` when there is no type.
 
 | Ecto field type | NULL is sent as |
 |---|---|
@@ -103,7 +166,11 @@ falls back to `:binary` when there is no type.
 | `:float` | `float` |
 
 These are the same types ecto_sql already declares for non-nil values of those
-fields, so no new conversions are introduced. Every other type is unchanged.
+fields ([connection.ex#L102-L117](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L102-L117),
+and tds's [float inference](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L119-L122)),
+so no new conversions are introduced. The conversion matrix shows each of
+these typed NULLs is accepted by every date and time column type. Every other
+Ecto type is unchanged.
 
 The test suite covers what this fixes, what it doesn't, and that nothing else
 changes; see the README.
