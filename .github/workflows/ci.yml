@@ -20,7 +20,7 @@ jobs:
 
     services:
       mssql:
-        image: mcr.microsoft.com/mssql/server:2022-latest
+        image: mcr.microsoft.com/mssql/server:2022-CU26-GDR1-ubuntu-22.04
         env:
           ACCEPT_EULA: "Y"
           MSSQL_SA_PASSWORD: "some!Password"

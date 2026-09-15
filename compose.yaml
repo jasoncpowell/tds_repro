@@ -5,7 +5,9 @@
 # Set MSSQL_PORT to use a host port other than 1433 (the app reads it too).
 services:
   mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    # Pinned to the build this repo was verified against: SQL Server 2022
+    # CU26 GDR (16.0.4275.2). `2022-latest` moves with each cumulative update.
+    image: mcr.microsoft.com/mssql/server:2022-CU26-GDR1-ubuntu-22.04
     # The image is amd64-only; Docker Desktop emulates it on Apple Silicon.
     platform: linux/amd64
     environment:
