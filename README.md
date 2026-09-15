@@ -41,7 +41,8 @@ SQL Server client.
 
 ## Quick start
 
-Needs Docker and Elixir (tested with Elixir 1.20.4 on OTP 29). On Apple
+Needs Docker, Elixir and a Unix shell (macOS, Linux, or WSL on Windows).
+Tested with Elixir 1.17.2 on OTP 27 and Elixir 1.20.4 on OTP 29. On Apple
 Silicon, turn on Rosetta in Docker Desktop: the SQL Server image is amd64-only.
 
 ```sh
