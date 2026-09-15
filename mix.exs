@@ -25,7 +25,9 @@ defmodule TdsRepro.MixProject do
   defp deps do
     [
       ecto_sql_dep(),
-      {:tds, "~> 2.3"}
+      {:tds, "~> 2.3"},
+      # JSON for :map fields and embedded schemas
+      {:jason, "~> 1.4"}
     ]
   end
 
