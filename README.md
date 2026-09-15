@@ -32,6 +32,11 @@ Teardown: `docker rm -f mssql-repro`
 
 ## Result
 
+Output with ecto_sql 3.14.0 as released. A later commit patches the vendored
+copy (see [Vendored ecto_sql](#vendored-ecto_sql)), after which every case
+passes. To see these failures again, run `git checkout 1e4b48f` (the unmodified
+copy) before running the repro, and `git checkout main` to return.
+
     PASS  baseline: INSERT with values
     PASS  INSERT with nil temporal fields
     FAIL  UPDATE date -> nil
