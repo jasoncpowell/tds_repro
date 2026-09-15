@@ -67,7 +67,7 @@ fix_commit=$(git log -1 --format=%h -- lib/ecto/adapters/tds.ex)
 git checkout --quiet "$fix_commit^" -- lib/ecto/adapters/tds.ex
 
 echo
-echo "Without the fix (lib/ecto/adapters/tds.ex from before $fix_commit)"
+echo "Without the fix (lib/ecto/adapters/tds.ex from before the fix commit)"
 check "unit test fails" fail without-fix-unit mix test "$unit_test"
 check "integration test fails" fail without-fix-integration env ECTO_ADAPTER=tds mix test "$integration_test"
 
