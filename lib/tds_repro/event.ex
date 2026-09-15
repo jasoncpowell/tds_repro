@@ -11,5 +11,9 @@ defmodule TdsRepro.Event do
     field :precise_at, :naive_datetime_usec
     # -> `datetimeoffset` column
     field :offset_at, :utc_datetime_usec
+    # -> `time(6)` column
+    field :tick, :time_usec
+    # -> `float` column
+    field :score, :float
   end
 end
