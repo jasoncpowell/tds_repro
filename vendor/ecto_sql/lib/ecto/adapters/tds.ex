@@ -154,7 +154,20 @@ defmodule Ecto.Adapters.Tds do
   @impl true
   def dumpers({:map, _}, type), do: [&Ecto.Type.embedded_dump(type, &1, :json)]
   def dumpers(:binary_id, type), do: [type, Tds.Ecto.UUID]
+  def dumpers(:date, type), do: [type, &typed_nil(&1, :date)]
+  def dumpers(:time, type), do: [type, &typed_nil(&1, :time)]
+  def dumpers(:time_usec, type), do: [type, &typed_nil(&1, :time)]
+  def dumpers(:naive_datetime, type), do: [type, &typed_nil(&1, :datetime2)]
+  def dumpers(:naive_datetime_usec, type), do: [type, &typed_nil(&1, :datetime2)]
+  def dumpers(:utc_datetime, type), do: [type, &typed_nil(&1, :datetimeoffset)]
+  def dumpers(:utc_datetime_usec, type), do: [type, &typed_nil(&1, :datetimeoffset)]
+  def dumpers(:float, type), do: [type, &typed_nil(&1, :float)]
   def dumpers(_, type), do: [type]
+
+  # A bare nil reaches the driver untyped and is sent as varbinary, which SQL
+  # Server refuses to convert implicitly to date/time and float columns.
+  defp typed_nil(nil, tds_type), do: {:ok, %Tds.Parameter{value: nil, type: tds_type}}
+  defp typed_nil(value, _tds_type), do: {:ok, value}
 
   defp bool_decode(<<0>>), do: {:ok, false}
   defp bool_decode(<<1>>), do: {:ok, true}
