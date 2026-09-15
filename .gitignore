@@ -1,6 +1,9 @@
 # The directory Mix will write compiled artifacts to.
 /_build/
 
+# Build artifacts when compiling against the released ecto_sql (ECTO_SQL=upstream).
+/_build_upstream/
+
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
 
