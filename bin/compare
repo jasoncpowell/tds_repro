@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Shows the bug and the fix with the same test suite.
+#
+#   bin/compare            run both checks below
+#   bin/compare upstream   released ecto_sql 3.14.0: every test tagged :bug
+#                          fails, and every other test passes
+#   bin/compare fixed      vendored ecto_sql with the fix: every test passes
+#
+# Needs SQL Server running (docker compose up -d --wait). Full test output is
+# written to tmp/compare/.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+logs=tmp/compare
+mkdir -p "$logs"
+status=0
+
+# Runs `mix test` with the given ECTO_SQL value and arguments, saves the output
+# to the given log, and prints "<tests> <failures>" from ExUnit's summary line,
+# which reads "Result: 17 passed" or "Result: 9/17 passed".
+run_tests() {
+  local log=$1 ecto_sql=$2 summary
+  shift 2
+  ECTO_SQL=$ecto_sql mix deps.get >/dev/null 2>&1
+  ECTO_SQL=$ecto_sql mix test --no-color "$@" >"$log" 2>&1
+  summary=$(grep -Eo 'Result: [0-9]+(/[0-9]+)? passed' "$log" | tail -1)
+
+  if [[ $summary =~ ([0-9]+)/([0-9]+) ]]; then
+    echo "${BASH_REMATCH[2]} $((BASH_REMATCH[2] - BASH_REMATCH[1]))"
+  elif [[ $summary =~ ([0-9]+) ]]; then
+    echo "${BASH_REMATCH[1]} 0"
+  fi
+}
+
+report() {
+  local label=$1 passed=$2 detail=$3
+  if [ "$passed" -eq 0 ]; then
+    printf '  ok    %s (%s)\n' "$label" "$detail"
+  else
+    printf '  FAIL  %s (%s)\n' "$label" "$detail"
+    status=1
+  fi
+}
+
+check_upstream() {
+  local tests failures
+  echo "Released ecto_sql 3.14.0 (ECTO_SQL=upstream)"
+
+  read -r tests failures <<<"$(run_tests "$logs/upstream-bug.log" upstream --only bug)"
+  [ "${tests:-0}" -gt 0 ] && [ "$tests" = "$failures" ]
+  report "the bug reproduces: every :bug test fails" $? "${failures:-?} of ${tests:-?} failed"
+
+  read -r tests failures <<<"$(run_tests "$logs/upstream-other.log" upstream --exclude bug)"
+  [ "${tests:-0}" -gt 0 ] && [ "$failures" = 0 ]
+  report "every other test passes" $? "${failures:-?} of ${tests:-?} failed"
+}
+
+check_fixed() {
+  local tests failures
+  echo "Vendored ecto_sql with the fix"
+
+  read -r tests failures <<<"$(run_tests "$logs/fixed.log" vendored)"
+  [ "${tests:-0}" -gt 0 ] && [ "$failures" = 0 ]
+  report "every test passes" $? "${failures:-?} of ${tests:-?} failed"
+}
+
+case "${1:-both}" in
+  upstream) check_upstream ;;
+  fixed) check_fixed ;;
+  both)
+    check_upstream
+    echo
+    check_fixed
+    ;;
+  *)
+    echo "usage: bin/compare [upstream|fixed]" >&2
+    exit 2
+    ;;
+esac
+
+if [ "$status" -ne 0 ]; then
+  echo "Full output is in $logs/." >&2
+fi
+
+exit "$status"

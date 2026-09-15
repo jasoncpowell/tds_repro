@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  compare:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Released ecto_sql 3.14.0 reproduces the bug
+            check: upstream
+          - name: Vendored ecto_sql with the fix passes
+            check: fixed
+
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "some!Password"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'some!Password' -Q 'SELECT 1' -b -o /dev/null"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-start-period 20s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20.4"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+            _build_upstream
+          key: mix-${{ matrix.check }}-${{ hashFiles('mix.lock', 'vendor/ecto_sql/**') }}
+
+      - name: Check formatting
+        if: matrix.check == 'fixed'
+        run: |
+          mix deps.get
+          mix format --check-formatted
+
+      - name: Compare
+        run: bin/compare ${{ matrix.check }}
+
+      - name: Show test output
+        if: failure()
+        run: tail -n 200 tmp/compare/*.log
