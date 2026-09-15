@@ -3,20 +3,27 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    # Weekly, to notice when ecto_sql master changes in a way the upstream
+    # patches no longer apply to or pass on.
+    - cron: "0 6 * * 1"
 
 jobs:
   compare:
-    name: ${{ matrix.name }}
+    name: >-
+      ${{ matrix.check == 'upstream' && 'Released ecto_sql reproduces the bug' || 'Vendored fix passes' }}
+      (Elixir ${{ matrix.beam.elixir }})
     runs-on: ubuntu-24.04
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Released ecto_sql 3.14.0 reproduces the bug
-            check: upstream
-          - name: Vendored ecto_sql with the fix passes
-            check: fixed
+        check: [upstream, fixed]
+        beam:
+          - elixir: "1.17.2"
+            otp: "27"
+          - elixir: "1.20.4"
+            otp: "29"
 
     services:
       mssql:
@@ -38,8 +45,8 @@ jobs:
 
       - uses: erlef/setup-beam@v1
         with:
-          otp-version: "29"
-          elixir-version: "1.20.4"
+          otp-version: ${{ matrix.beam.otp }}
+          elixir-version: ${{ matrix.beam.elixir }}
 
       - uses: actions/cache@v4
         with:
@@ -47,10 +54,10 @@ jobs:
             deps
             _build
             _build_upstream
-          key: mix-${{ matrix.check }}-${{ hashFiles('mix.lock', 'vendor/ecto_sql/**') }}
+          key: mix-${{ matrix.check }}-${{ matrix.beam.elixir }}-${{ hashFiles('mix.lock', 'vendor/ecto_sql/**') }}
 
       - name: Check formatting
-        if: matrix.check == 'fixed'
+        if: matrix.check == 'fixed' && matrix.beam.elixir == '1.20.4'
         run: |
           mix deps.get
           mix format --check-formatted
@@ -61,3 +68,39 @@ jobs:
       - name: Show test output
         if: failure()
         run: tail -n 200 tmp/compare/*.log
+
+  upstream:
+    name: Upstream patches pass on ecto_sql master (SQL Server 2019)
+    runs-on: ubuntu-24.04
+
+    services:
+      mssql:
+        # ecto_sql's own CI runs its Tds tests against 2017-latest and
+        # 2019-latest. The 2019 image only has sqlcmd in /opt/mssql-tools.
+        image: mcr.microsoft.com/mssql/server:2019-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "some!Password"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'some!Password' -Q 'SELECT 1' -b -o /dev/null || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'some!Password' -Q 'SELECT 1' -b -o /dev/null"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-start-period 20s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20.4"
+
+      - name: Verify the patches against ecto_sql master
+        run: bin/verify-upstream
+
+      - name: Show test output
+        if: failure()
+        run: tail -n 200 tmp/verify-upstream/*.log
