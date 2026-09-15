@@ -18,9 +18,9 @@ both still open.
 
 | | |
 |---|---|
-| **Bug** | Reproduces on ecto_sql 3.14.0, tds 2.3.8 and SQL Server 2022. |
-| **Fix** | 13 lines in `Ecto.Adapters.Tds.dumpers/2` (commit `4d570f4`), applied to the copy of ecto_sql in [`vendor/ecto_sql`](vendor/ecto_sql). All 100 tests pass with it. |
-| **Upstream PR** | Not submitted yet. Draft in [docs/pr-draft.md](docs/pr-draft.md). |
+| **Bug** | Reproduces on the latest releases (ecto_sql 3.14.0, ecto 3.14.2, tds 2.3.8) and on ecto_sql master, against SQL Server 2017, 2019 and 2022. |
+| **Fix** | 13 lines in `Ecto.Adapters.Tds.dumpers/2` (commit `4d570f4`), applied to the copy of ecto_sql in [`vendor/ecto_sql`](vendor/ecto_sql). All 100 tests in this repo pass with it. |
+| **Upstream PR** | Ready, not submitted. The fix and its tests are in [`upstream/ecto_sql/`](upstream/ecto_sql) and pass on ecto_sql master: ecto_sql's full unit suite, and its full Tds integration suite against SQL Server 2017, 2019 and 2022, with no regressions. See the [PR draft](docs/pr-draft.md) and [how to submit it](docs/creating-the-pr.md). |
 
 ## Who is affected
 
@@ -39,15 +39,30 @@ To find exposed columns in a database, run
 [`scripts/find_affected_columns.sql`](scripts/find_affected_columns.sql) in any
 SQL Server client.
 
-## Quick start
+## Setup
 
-Needs Docker, Elixir and a Unix shell (macOS, Linux, or WSL on Windows).
-Tested with Elixir 1.17.2 on OTP 27 and Elixir 1.20.4 on OTP 29. On Apple
-Silicon, turn on Rosetta in Docker Desktop: the SQL Server image is amd64-only.
+### Prerequisites
+
+- **Docker**, with at least 2 GB of memory for containers, Microsoft's minimum
+  for SQL Server.
+- **On Apple Silicon**, turn on *Use Rosetta for x86_64/amd64 emulation on
+  Apple Silicon* in Docker Desktop. SQL Server images are x86-64 only, and
+  Microsoft doesn't test or support running them under emulation, but it works
+  for this repo. CI runs natively on x86-64.
+- **Elixir 1.17 or later**, with Hex and rebar (`mix local.hex --force && mix local.rebar --force`
+  on a fresh install). Tested with Elixir 1.17.2 on OTP 27 and 1.20.4 on OTP 29.
+- **A Unix shell:** macOS, Linux, or WSL on Windows.
+
+Starting the container accepts the SQL Server end-user license agreement
+(`ACCEPT_EULA=Y` in [`compose.yaml`](compose.yaml)) and runs the free Developer
+edition. The image is pinned to SQL Server 2022 CU26 GDR (16.0.4275.2), the
+build these results come from.
+
+### Run it
 
 ```sh
-docker compose up -d --wait   # SQL Server on port 1433, waits until ready
-mix setup                     # deps, database, migrations
+docker compose up -d --wait   # SQL Server on port 1433, waits until it accepts queries
+mix setup                     # deps for both ecto_sql versions, database, migrations
 bin/compare                   # the bug on released ecto_sql, then the fix
 ```
 
@@ -64,11 +79,11 @@ Vendored ecto_sql with the fix
 ```
 
 If port 1433 is taken, pick another and pass it to every command, for example
-`MSSQL_PORT=14330 docker compose up -d --wait` and `MSSQL_PORT=14330 mix setup`.
-If you started SQL Server earlier with `docker run --name mssql-repro`, remove
-it first with `docker rm -f mssql-repro`.
+`MSSQL_PORT=14330 docker compose up -d --wait`, `MSSQL_PORT=14330 mix setup`
+and `MSSQL_PORT=14330 bin/compare`.
 
-Tear down with `docker compose down -v`.
+Tear down with `docker compose down -v`. The databases live inside the
+container, so run `mix setup` again after it is recreated.
 
 ## Released ecto_sql or the fix
 
@@ -126,7 +141,7 @@ else passes on both.
 
 | File | Covers |
 |---|---|
-| [`dumpers_test.exs`](test/tds_repro/dumpers_test.exs) | How the adapter dumps nil, without a database. The shape of the unit test the upstream PR needs. |
+| [`dumpers_test.exs`](test/tds_repro/dumpers_test.exs) | How the adapter dumps nil, without a database. |
 | [`nil_values_test.exs`](test/tds_repro/nil_values_test.exs) | Writing nil through `Repo.update`, `Repo.insert_all` and `Repo.update_all` for 25 combinations of Ecto field type and column type, plus checks that nothing else changed. |
 | [`known_limitations_test.exs`](test/tds_repro/known_limitations_test.exs) | What the fix doesn't cover, asserted so a change in behaviour is noticed. |
 | [`workarounds_test.exs`](test/tds_repro/workarounds_test.exs) | What works on released ecto_sql today. |
@@ -140,6 +155,34 @@ Tests use their own `tds_repro_test` database, created and migrated by
 git show 4d570f4
 ```
 
+## Verifying the upstream patches
+
+```sh
+bin/verify-upstream
+```
+
+It clones ecto_sql master, applies [`upstream/ecto_sql/*.patch`](upstream/ecto_sql),
+and runs the new upstream tests with the fix and without it:
+
+```
+Cloning https://github.com/elixir-ecto/ecto_sql.git
+  at 2385763 2026-09-06 Fix NOT precedence for in and is_nil (#753)
+  ok    patches apply (2 patches)
+
+With the fix
+  ok    unit test passes (0 of 3 failed)
+  ok    integration test passes (0 of 28 failed)
+
+Without the fix (lib/ecto/adapters/tds.ex from before the fix commit)
+  ok    unit test fails (1 of 3 failed)
+  ok    integration test fails (22 of 28 failed)
+```
+
+The `at` line shows whichever ecto_sql master commit was cloned. The script
+needs network access, and ecto_sql's integration tests drop and recreate a
+database named `ecto_test` on your SQL Server. The full results against
+SQL Server 2017, 2019 and 2022 are in the [PR draft](docs/pr-draft.md#verification-log).
+
 ## Scripts
 
 | Command | Shows |
@@ -152,30 +195,49 @@ git show 4d570f4
 - [Root cause](docs/root-cause.md): where the type gets lost, which types fail, and what the fix changes.
 - [Upstream history](docs/upstream-history.md): what has been tried and said upstream, and how the fix responds.
 - [Workarounds](docs/workarounds.md): writing nil on released ecto_sql today.
-- [PR draft](docs/pr-draft.md): the proposed ecto_sql PR description and what's left before submitting.
+- [PR draft](docs/pr-draft.md): the proposed ecto_sql PR description and the verification results.
+- [Creating the PR](docs/creating-the-pr.md): step-by-step submission instructions.
+- [References](docs/references.md): every source the docs rely on.
+
+## Using Claude with this repo
+
+[`CLAUDE.md`](CLAUDE.md) gives Claude Code the repo's commands and rules. To
+have Claude submit the fix, ask it to follow
+[docs/creating-the-pr.md](docs/creating-the-pr.md). It will show you what it
+is about to send and wait for your confirmation before each step others can
+see: forking, pushing, opening the PR, and commenting on the tds issues.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `tcp connect: econnrefused` | SQL Server isn't running. Check `docker compose ps` and start it with `docker compose up -d --wait`. |
+| `port is already allocated` from `docker compose up` | Something else is using port 1433, such as a container started earlier with `docker run --name mssql-repro`. Remove it (`docker rm -f mssql-repro`) or use another port with `MSSQL_PORT`. |
+| The container never becomes healthy, or exits | Check `docker compose logs mssql`. The usual causes are less than 2 GB of memory for Docker, or Rosetta emulation turned off on Apple Silicon. |
+| `the dependency is not available, run "mix deps.get"` with `ECTO_SQL=upstream` | Run `mix setup`, which fetches deps for both versions, or `ECTO_SQL=upstream mix deps.get`. |
+| "Cannot open database" or login errors after `docker compose down`, or after `compose.yaml` changed the image | The container was recreated and its databases are gone. Run `mix setup`. |
+| Compiler warnings from `tds` on the first build | They come from the dependency and are harmless. |
+| Mix asks to install Hex or rebar | Answer yes, or run `mix local.hex --force && mix local.rebar --force` first. |
 
 ## Vendored ecto_sql
 
 `vendor/ecto_sql` is a copy of [ecto_sql](https://github.com/elixir-ecto/ecto_sql)
 3.14.0 as published on Hex (Apache-2.0, see its `LICENSE.md`). It was committed
 unmodified first (`1e4b48f`), and changes to it are kept in their own commits,
-so this shows exactly what would go into an upstream PR:
+so this shows exactly the change to the library:
 
 ```sh
 git log -p -- vendor/ecto_sql
 ```
 
-To move the fix into a fork of ecto_sql:
-
-```sh
-# in this repo
-git format-patch -1 4d570f4 --relative=vendor/ecto_sql -o ..
-# in the fork, on a new branch
-git am -3 ../0001-*.patch
-```
+The same change, plus tests in ecto_sql's own test suite, is in
+[`upstream/ecto_sql/`](upstream/ecto_sql) as patches against ecto_sql master.
 
 ## CI
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `bin/compare upstream`
-and `bin/compare fixed` as separate jobs against a SQL Server service
-container, and checks formatting.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs:
+
+- `bin/compare upstream` and `bin/compare fixed` on Elixir 1.17 and 1.20,
+  against the pinned SQL Server 2022 image, plus a formatting check.
+- `bin/verify-upstream` against ecto_sql master and SQL Server 2019, on every
+  push and weekly, to catch changes on master that break the patches.
