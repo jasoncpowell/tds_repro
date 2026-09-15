@@ -11,3 +11,7 @@ config :tds_repro, TdsRepro.Repo,
   pool_size: 5
 
 config :logger, level: :info
+
+if config_env() == :test do
+  import_config "test.exs"
+end
