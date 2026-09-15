@@ -16,19 +16,29 @@ mkdir -p "$logs"
 status=0
 
 # Runs `mix test` with the given ECTO_SQL value and arguments, saves the output
-# to the given log, and prints "<tests> <failures>" from ExUnit's summary line,
-# which reads "Result: 17 passed" or "Result: 9/17 passed".
+# to the given log, and prints "<tests run> <failures>" from ExUnit's summary.
 run_tests() {
-  local log=$1 ecto_sql=$2 summary
+  local log=$1 ecto_sql=$2 line
+  # Elixir 1.20+: "Result: 67 passed, 33 excluded" or "Result: 0/33 passed, ..."
+  local new_format='Result: ([0-9]+)(/([0-9]+))? passed'
+  # Earlier versions: "100 tests, 33 failures, 67 excluded", where the test
+  # count includes the excluded tests
+  local old_format='([0-9]+) tests?, ([0-9]+) failures?(, ([0-9]+) excluded)?'
   shift 2
+
   ECTO_SQL=$ecto_sql mix deps.get >/dev/null 2>&1
   ECTO_SQL=$ecto_sql mix test --no-color "$@" >"$log" 2>&1
-  summary=$(grep -Eo 'Result: [0-9]+(/[0-9]+)? passed' "$log" | tail -1)
 
-  if [[ $summary =~ ([0-9]+)/([0-9]+) ]]; then
-    echo "${BASH_REMATCH[2]} $((BASH_REMATCH[2] - BASH_REMATCH[1]))"
-  elif [[ $summary =~ ([0-9]+) ]]; then
-    echo "${BASH_REMATCH[1]} 0"
+  line=$(grep -Eo "$new_format" "$log" | tail -1)
+  if [[ $line =~ $new_format ]]; then
+    local passed=${BASH_REMATCH[1]} total=${BASH_REMATCH[3]:-${BASH_REMATCH[1]}}
+    echo "$total $((total - passed))"
+    return
+  fi
+
+  line=$(grep -Eo "$old_format" "$log" | tail -1)
+  if [[ $line =~ $old_format ]]; then
+    echo "$((BASH_REMATCH[1] - ${BASH_REMATCH[4]:-0})) ${BASH_REMATCH[2]}"
   fi
 }
 
