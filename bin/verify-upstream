@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Checks the patches in upstream/ecto_sql/ against ecto_sql itself:
+#
+#   1. they apply cleanly to ecto_sql master (or to the checkout you give)
+#   2. with the fix, the new unit test and integration test pass
+#   3. without the fix, the same tests fail, so they really cover the bug
+#
+#   bin/verify-upstream               clone elixir-ecto/ecto_sql master
+#   bin/verify-upstream ../ecto_sql   clone a local checkout instead, e.g. your
+#                                     fork, whose HEAD doesn't have the patches
+#
+# Needs SQL Server running (docker compose up -d --wait) and network access for
+# the clone and dependencies. ecto_sql's integration tests drop and recreate a
+# database named ecto_test on that server. Work happens in tmp/verify-upstream/.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+source bin/lib/summary.sh
+
+root=$PWD
+work=$root/tmp/verify-upstream
+source=${1:-https://github.com/elixir-ecto/ecto_sql.git}
+unit_test=test/ecto/type_test.exs
+integration_test=integration_test/tds/nil_parameters_test.exs
+status=0
+
+# ecto_sql's Tds integration tests connect with this (see its test_helper.exs)
+export MSSQL_URL="sa:some!Password@${MSSQL_HOST:-localhost}:${MSSQL_PORT:-1433}"
+
+rm -rf "$work" && mkdir -p "$work"
+echo "Cloning $source"
+git clone --quiet "$source" "$work/ecto_sql" || exit 1
+cd "$work/ecto_sql" || exit 1
+echo "  at $(git log -1 --format='%h %ad %s' --date=short)"
+
+patches=("$root"/upstream/ecto_sql/*.patch)
+git -c user.name=verify-upstream -c user.email=verify-upstream@localhost am --quiet -3 "${patches[@]}"
+report "patches apply" $? "${#patches[@]} patches"
+[ "$status" -eq 0 ] || { echo "Resolve the conflict in $work/ecto_sql." >&2; exit 1; }
+
+if ! mix deps.get >"$work/deps.log" 2>&1; then
+  echo "mix deps.get failed, see $work/deps.log" >&2
+  exit 1
+fi
+
+# check <label> <pass|fail> <log name> <command...>
+check() {
+  local label=$1 expect=$2 log=$work/$3.log tests failures
+  shift 3
+  "$@" --no-color >"$log" 2>&1
+  read -r tests failures <<<"$(test_counts "$log")"
+
+  if [ "$expect" = pass ]; then
+    [ "${tests:-0}" -gt 0 ] && [ "$failures" = 0 ]
+  else
+    [ "${tests:-0}" -gt 0 ] && [ "${failures:-0}" -gt 0 ]
+  fi
+
+  report "$label" $? "${failures:-?} of ${tests:-?} failed"
+}
+
+echo
+echo "With the fix"
+check "unit test passes" pass with-fix-unit mix test "$unit_test"
+check "integration test passes" pass with-fix-integration env ECTO_ADAPTER=tds mix test "$integration_test"
+
+fix_commit=$(git log -1 --format=%h -- lib/ecto/adapters/tds.ex)
+git checkout --quiet "$fix_commit^" -- lib/ecto/adapters/tds.ex
+
+echo
+echo "Without the fix (lib/ecto/adapters/tds.ex from before $fix_commit)"
+check "unit test fails" fail without-fix-unit mix test "$unit_test"
+check "integration test fails" fail without-fix-integration env ECTO_ADAPTER=tds mix test "$integration_test"
+
+git checkout --quiet HEAD -- lib/ecto/adapters/tds.ex
+
+if [ "$status" -ne 0 ]; then
+  echo "Full output is in $work/." >&2
+fi
+
+exit "$status"

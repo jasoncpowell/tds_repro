@@ -1,0 +1,50 @@
+From 4b69420d7a65d613b09eeb2aebf38773736f3f87 Mon Sep 17 00:00:00 2001
+From: Jason Powell <jasoncpowell@protonmail.com>
+Date: Tue, 15 Sep 2026 12:12:26 -0400
+Subject: [PATCH 1/2] Tds: send typed NULL for nil date, time and float params
+
+A bare nil has no type, so the Tds adapter passed it to the driver
+untyped and the driver sent it as varbinary. SQL Server refuses to
+convert varbinary implicitly to date, time, datetime2, datetimeoffset,
+float or real, so clearing such a field failed with error 257 or 206.
+
+Dump nil values for these Ecto types as a %Tds.Parameter{} with an
+explicit type, matching the types already used for non-nil values.
+Other types are unchanged.
+
+Refs elixir-ecto/tds#124, elixir-ecto/tds#168
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ lib/ecto/adapters/tds.ex | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/lib/ecto/adapters/tds.ex b/lib/ecto/adapters/tds.ex
+index 711eae9..70257c9 100644
+--- a/lib/ecto/adapters/tds.ex
++++ b/lib/ecto/adapters/tds.ex
+@@ -154,8 +154,21 @@ defmodule Ecto.Adapters.Tds do
+   @impl true
+   def dumpers({:map, _}, type), do: [&Ecto.Type.embedded_dump(type, &1, :json)]
+   def dumpers(:binary_id, type), do: [type, Tds.Ecto.UUID]
++  def dumpers(:date, type), do: [type, &typed_nil(&1, :date)]
++  def dumpers(:time, type), do: [type, &typed_nil(&1, :time)]
++  def dumpers(:time_usec, type), do: [type, &typed_nil(&1, :time)]
++  def dumpers(:naive_datetime, type), do: [type, &typed_nil(&1, :datetime2)]
++  def dumpers(:naive_datetime_usec, type), do: [type, &typed_nil(&1, :datetime2)]
++  def dumpers(:utc_datetime, type), do: [type, &typed_nil(&1, :datetimeoffset)]
++  def dumpers(:utc_datetime_usec, type), do: [type, &typed_nil(&1, :datetimeoffset)]
++  def dumpers(:float, type), do: [type, &typed_nil(&1, :float)]
+   def dumpers(_, type), do: [type]
+ 
++  # A bare nil reaches the driver untyped and is sent as varbinary, which SQL
++  # Server refuses to convert implicitly to date/time and float columns.
++  defp typed_nil(nil, tds_type), do: {:ok, %Tds.Parameter{value: nil, type: tds_type}}
++  defp typed_nil(value, _tds_type), do: {:ok, value}
++
+   defp bool_decode(<<0>>), do: {:ok, false}
+   defp bool_decode(<<1>>), do: {:ok, true}
+   defp bool_decode(0), do: {:ok, false}
+-- 
+2.55.0
+
