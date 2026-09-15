@@ -45,7 +45,10 @@ defmodule TdsRepro.MixProject do
 
   defp aliases do
     [
-      setup: ["deps.get", "ecto.setup"],
+      # Fetches deps for both the fix and released ecto_sql (ECTO_SQL=upstream).
+      # `env` sets the variable itself: since Elixir 1.19 aliases don't run
+      # `mix cmd` through a shell.
+      setup: ["deps.get", "cmd env ECTO_SQL=upstream mix deps.get", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
