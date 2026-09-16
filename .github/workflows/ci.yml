@@ -75,8 +75,8 @@ jobs:
 
     services:
       mssql:
-        # ecto_sql's own CI runs its Tds tests against 2017-latest and
-        # 2019-latest. The 2019 image only has sqlcmd in /opt/mssql-tools.
+        # ecto_sql's own CI runs its Tds tests against 2019-latest and
+        # 2022-latest. The 2019 image only has sqlcmd in /opt/mssql-tools.
         image: mcr.microsoft.com/mssql/server:2019-latest
         env:
           ACCEPT_EULA: "Y"

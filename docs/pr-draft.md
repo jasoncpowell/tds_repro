@@ -82,7 +82,7 @@ A standalone reproduction covering 25 combinations of Ecto field type and column
 
 ## Verification log
 
-Run on 2026-09-15 against ecto_sql master [`2385763`](https://github.com/elixir-ecto/ecto_sql/commit/2385763) with the patches applied, Elixir 1.20.4 on OTP 29, tds 2.3.8, and SQL Server running under Rosetta 2 emulation on Apple Silicon. ecto_sql's own CI uses Elixir 1.19.4 for unit tests and SQL Server 2017 and 2019 for Tds integration tests.
+Run on 2026-09-15 against ecto_sql master [`2385763`](https://github.com/elixir-ecto/ecto_sql/commit/2385763) with the patches applied, Elixir 1.20.4 on OTP 29, tds 2.3.8, and SQL Server running under Rosetta 2 emulation on Apple Silicon. ecto_sql's own CI uses Elixir 1.19.4 for unit tests and SQL Server 2019 and 2022 for Tds integration tests.
 
 Without a database:
 

@@ -11,6 +11,7 @@ supports. Checked on 2026-09-15.
 | [tds#124: rschenk's analysis](https://github.com/elixir-ecto/tds/issues/124#issuecomment-1452901953) | Cause traced to `Tds.Parameter.fix_data_type/1`; `:string` breaks `varbinary`. |
 | [tds#124: mjaric asks for a repro](https://github.com/elixir-ecto/tds/issues/124#issuecomment-1546648200) | Fix might belong in the Ecto adapter. |
 | [rschenk/ecto_tds_null_dates](https://github.com/rschenk/ecto_tds_null_dates) | Earlier minimal reproduction (2023). |
+| [tds#124: rschenk publishes the repro](https://github.com/elixir-ecto/tds/issues/124#issuecomment-1557647492) (2023-05-22) | Links to rschenk/ecto_tds_null_dates. |
 | [tds#124: mlooney](https://github.com/elixir-ecto/tds/issues/124#issuecomment-1745349569) | Workaround of changing the column type to a string. |
 | [tds#124: "any attempt to make nil be something else by default"](https://github.com/elixir-ecto/tds/issues/124#issuecomment-2158154829) | Maintainer: no default works; use `type/2`. |
 | [tds#124: implicit conversion](https://github.com/elixir-ecto/tds/issues/124#issuecomment-2158171077) | Maintainer: don't rely on implicit conversion. |
@@ -23,9 +24,9 @@ supports. Checked on 2026-09-15.
 | [tds#162: rschenk](https://github.com/elixir-ecto/tds/pull/162#issuecomment-2155050557), [wojtekmach's test script](https://github.com/elixir-ecto/tds/pull/162#issuecomment-2157626223), [mjaric](https://github.com/elixir-ecto/tds/pull/162#issuecomment-2159217692), [closing comment](https://github.com/elixir-ecto/tds/pull/162#issuecomment-2160077979) | Which column types each fallback breaks; `:binary_id` priority. |
 | [elixir-ecto/tds#168](https://github.com/elixir-ecto/tds/issues/168) (2025-04-03, open) | `insert_all` with an explicit nil fails against `datetime2`. |
 | [Elixir Forum thread 40034](https://elixirforum.com/t/error-on-updating-a-time-field-to-null-using-ecto-with-tds-adapter/40034) (2021-05-27) | Same error for a `time` field. |
-| `wm-types` proof of concept in [ecto](https://github.com/elixir-ecto/ecto/compare/master...wm-types) and [ecto_sql](https://github.com/elixir-ecto/ecto_sql/compare/master...wm-types) (2024-06-10) | The maintainers' Option 1 sketch. |
+| `wm-types` proof of concept in [ecto](https://github.com/elixir-ecto/ecto/compare/24f914a...wm-types) and [ecto_sql](https://github.com/elixir-ecto/ecto_sql/compare/2385763...wm-types) (2024-06-10) | The maintainers' Option 1 sketch. |
 | [elixir-ecto/tds#183](https://github.com/elixir-ecto/tds/pull/183) (draft) and branch [`next`](https://github.com/elixir-ecto/tds/tree/next) | Driver rewrite still falls back to `:binary` for untyped nils. |
-| [elixir-ecto/tds#119](https://github.com/elixir-ecto/tds/issues/119), [elixir-ecto/ecto_sql#302](https://github.com/elixir-ecto/ecto_sql/issues/302) (2021) | Related: wrong inferred types for raw query parameters. |
+| [elixir-ecto/tds#119](https://github.com/elixir-ecto/tds/issues/119), [elixir-ecto/ecto_sql#302](https://github.com/elixir-ecto/ecto_sql/issues/302) (2021) | Related: `Ecto.Adapters.SQL.query/4` doesn't set the correct type for parameters. |
 
 ## Code and changes
 
@@ -46,7 +47,8 @@ supports. Checked on 2026-09-15.
 | [elixir-ecto/ecto_sql#528](https://github.com/elixir-ecto/ecto_sql/pull/528), [`22be184`](https://github.com/elixir-ecto/ecto_sql/commit/22be18491f) | Tds loaders adjusted for ecto#4214. |
 | [elixir-ecto/ecto_sql#579](https://github.com/elixir-ecto/ecto_sql/pull/579) (ecto_sql 3.12.0) | `%Tds.Parameter{}` accepted in `Repo.query/3`. |
 | [elixir-ecto/ecto_sql#184](https://github.com/elixir-ecto/ecto_sql/pull/184) (2020-03-10) | Tds adapter merged into ecto_sql. |
-| ecto_sql [`Earthfile`](https://github.com/elixir-ecto/ecto_sql/blob/master/Earthfile) and [CI workflow](https://github.com/elixir-ecto/ecto_sql/blob/master/.github/workflows/ci.yml) | Upstream CI runs Tds integration tests against SQL Server 2017 and 2019. |
+| ecto_sql [`Earthfile`](https://github.com/elixir-ecto/ecto_sql/blob/2385763/Earthfile) and [CI workflow](https://github.com/elixir-ecto/ecto_sql/blob/2385763/.github/workflows/ci.yml) | Upstream CI runs Tds integration tests against SQL Server 2019 and 2022. |
+| ecto_sql master [`2385763`](https://github.com/elixir-ecto/ecto_sql/commit/2385763) (2026-09-06) | Still sends nil without a type; the bug is unresolved on master. |
 
 ## Ecto, ecto_sql and tds documentation
 

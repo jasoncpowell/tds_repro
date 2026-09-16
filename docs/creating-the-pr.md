@@ -73,7 +73,7 @@ MSSQL_URL='sa:some!Password@localhost:1433' ECTO_ADAPTER=tds mix test
 ```
 
 The last command is the full Tds integration suite, the same one ecto_sql's CI
-runs against SQL Server 2017 and 2019 (see its `Earthfile`). It drops and
+runs against SQL Server 2019 and 2022 (see its CI workflow). It drops and
 recreates a database named `ecto_test`. Compare any failures against a run on
 `upstream/master` without the patches: only failures that appear with the
 patches matter. The results from this repo's own run are in pr-draft.md.
