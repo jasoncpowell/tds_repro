@@ -24,6 +24,15 @@ defmodule TdsRepro.KnownLimitationsTest do
       test "Repo.update/2 can't set #{field} to nil", %{row: row} do
         assert_refused(206, fn -> row |> change(%{@field => nil}) |> Repo.update() end)
       end
+
+      test "Repo.insert_all/3 can't insert nil for #{field}" do
+        assert_refused(206, fn -> Repo.insert_all(AllTypes, [%{@field => nil}]) end)
+      end
+
+      test "Repo.update_all/3 can't set #{field} to nil", %{row: row} do
+        query = from(r in AllTypes, where: r.id == ^row.id)
+        assert_refused(206, fn -> Repo.update_all(query, set: [{@field, nil}]) end)
+      end
     end
   end
 
