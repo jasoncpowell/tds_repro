@@ -1,50 +1,133 @@
-From 4b69420d7a65d613b09eeb2aebf38773736f3f87 Mon Sep 17 00:00:00 2001
+From e7c3efea8613c5c73aca191e6e123ec43b339a3a Mon Sep 17 00:00:00 2001
 From: Jason Powell <jasoncpowell@protonmail.com>
-Date: Tue, 15 Sep 2026 12:12:26 -0400
+Date: Fri, 18 Sep 2026 13:13:29 -0400
 Subject: [PATCH 1/2] Tds: send typed NULL for nil date, time and float params
 
 A bare nil has no type, so the Tds adapter passed it to the driver
-untyped and the driver sent it as varbinary. SQL Server refuses to
+untyped and the driver declared it as varbinary. SQL Server refuses to
 convert varbinary implicitly to date, time, datetime2, datetimeoffset,
 float or real, so clearing such a field failed with error 257 or 206.
 
-Dump nil values for these Ecto types as a %Tds.Parameter{} with an
-explicit type, matching the types already used for non-nil values.
-Other types are unchanged.
+Ecto.Adapters.Tds.dumpers/2 now tags a nil of these Ecto types with the
+type, as Tds.Ecto.VarChar does with {value, :varchar}, and
+Ecto.Adapters.Tds.Connection.prepare_params/1 turns the tag into a
+%Tds.Parameter{} declared as the type it already uses for a non-nil
+date or time value of the same field (date, time, datetime2 or
+datetimeoffset), or as float. The driver declares a nil float as
+decimal(1,0), which SQL Server converts implicitly to float and real.
+
+The adapter module compiles without the optional tds dependency, so it
+cannot build the %Tds.Parameter{} itself; only the connection, which is
+compiled when Tds is loaded, can. Only built-in types are tagged: the
+dumpers match the Ecto type against its primitive, so a custom type
+with one of these primitives, whose non-nil values may be stored in
+another representation, keeps sending a bare nil as before. Other
+types, including :string on legacy text and ntext columns, are
+unchanged.
+
+Ecto.Adapters.SQL.to_sql/3 and the :params metadata of query telemetry
+events now contain {nil, :date} and the like where they contained nil.
+Logged parameters are the cast values and still show nil.
 
 Refs elixir-ecto/tds#124, elixir-ecto/tds#168
 
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ---
- lib/ecto/adapters/tds.ex | 13 +++++++++++++
- 1 file changed, 13 insertions(+)
+ lib/ecto/adapters/tds.ex            | 34 +++++++++++++++++++++++++++++
+ lib/ecto/adapters/tds/connection.ex | 23 +++++++++++++++++++
+ 2 files changed, 57 insertions(+)
 
 diff --git a/lib/ecto/adapters/tds.ex b/lib/ecto/adapters/tds.ex
-index 711eae9..70257c9 100644
+index 711eae9..c13e9e3 100644
 --- a/lib/ecto/adapters/tds.ex
 +++ b/lib/ecto/adapters/tds.ex
-@@ -154,8 +154,21 @@ defmodule Ecto.Adapters.Tds do
+@@ -151,11 +151,45 @@ defmodule Ecto.Adapters.Tds do
+   def loaders(:binary_id, type), do: [Tds.Ecto.UUID, type]
+   def loaders(_, type), do: [type]
+ 
++  # Ecto types whose columns refuse a NULL declared as varbinary; see tag_nil/2.
++  @tagged_nil_types [
++    :date,
++    :time,
++    :time_usec,
++    :naive_datetime,
++    :naive_datetime_usec,
++    :utc_datetime,
++    :utc_datetime_usec,
++    :float
++  ]
++
    @impl true
    def dumpers({:map, _}, type), do: [&Ecto.Type.embedded_dump(type, &1, :json)]
    def dumpers(:binary_id, type), do: [type, Tds.Ecto.UUID]
-+  def dumpers(:date, type), do: [type, &typed_nil(&1, :date)]
-+  def dumpers(:time, type), do: [type, &typed_nil(&1, :time)]
-+  def dumpers(:time_usec, type), do: [type, &typed_nil(&1, :time)]
-+  def dumpers(:naive_datetime, type), do: [type, &typed_nil(&1, :datetime2)]
-+  def dumpers(:naive_datetime_usec, type), do: [type, &typed_nil(&1, :datetime2)]
-+  def dumpers(:utc_datetime, type), do: [type, &typed_nil(&1, :datetimeoffset)]
-+  def dumpers(:utc_datetime_usec, type), do: [type, &typed_nil(&1, :datetimeoffset)]
-+  def dumpers(:float, type), do: [type, &typed_nil(&1, :float)]
++  def dumpers(type, type) when type in @tagged_nil_types, do: [type, &tag_nil(&1, type)]
    def dumpers(_, type), do: [type]
  
-+  # A bare nil reaches the driver untyped and is sent as varbinary, which SQL
-+  # Server refuses to convert implicitly to date/time and float columns.
-+  defp typed_nil(nil, tds_type), do: {:ok, %Tds.Parameter{value: nil, type: tds_type}}
-+  defp typed_nil(value, _tds_type), do: {:ok, value}
++  # A nil has no type of its own. Left bare, it reaches the driver untyped and
++  # is declared as varbinary (Tds.Parameter.fix_data_type/1), which SQL Server
++  # won't convert implicitly to date, time, datetime2, datetimeoffset, float or
++  # real columns (errors 257 and 206). So tag the nil with its Ecto type, the
++  # way Tds.Ecto.VarChar tags values with :varchar, and let
++  # Ecto.Adapters.Tds.Connection.prepare_params/1 turn it into a typed
++  # parameter. This module compiles without the optional tds dependency, so it
++  # can't build a %Tds.Parameter{} itself.
++  #
++  # Only built-in types are tagged: the dumpers/2 clause above matches the Ecto
++  # type against its own primitive. A custom type with one of these primitives
++  # may store non-nil values in another representation, and Ecto never calls
++  # its dump/1 for nil, so its nil stays bare and is handled as before.
++  #
++  # :string is left alone on purpose. Typing a nil string as nvarchar would fix
++  # legacy text and ntext columns but break :string fields stored in varbinary
++  # columns, which is why the same fallback was rejected for the driver in
++  # elixir-ecto/tds#162.
++  defp tag_nil(nil, type), do: {:ok, {nil, type}}
++  defp tag_nil(value, _type), do: {:ok, value}
 +
    defp bool_decode(<<0>>), do: {:ok, false}
    defp bool_decode(<<1>>), do: {:ok, true}
    defp bool_decode(0), do: {:ok, false}
+diff --git a/lib/ecto/adapters/tds/connection.ex b/lib/ecto/adapters/tds/connection.ex
+index 170b832..1f2788b 100644
+--- a/lib/ecto/adapters/tds/connection.ex
++++ b/lib/ecto/adapters/tds/connection.ex
+@@ -135,6 +135,25 @@ if Code.ensure_loaded?(Tds) do
+     defp prepare_param(%{} = value), do: {json_library().encode!(value), :string}
+     defp prepare_param(value), do: prepare_raw_param(value)
+ 
++    # Ecto.Adapters.Tds.dumpers/2 tags a nil of these Ecto types with the type,
++    # because an untyped NULL is declared as varbinary, which date, time,
++    # datetime2, datetimeoffset, float and real columns refuse. Declare it as
++    # the type prepare_param/1 uses for a non-nil date or time value of the
++    # same Ecto type, or as :float, the type the driver infers for a non-nil
++    # float. The driver declares a nil :float as decimal(1,0), which SQL Server
++    # converts implicitly to float and real. Compare ecto_to_db/5, which maps
++    # the same Ecto types to the column types migrations create.
++    @typed_nil_params %{
++      date: :date,
++      time: :time,
++      time_usec: :time,
++      naive_datetime: :datetime2,
++      naive_datetime_usec: :datetime2,
++      utc_datetime: :datetimeoffset,
++      utc_datetime_usec: :datetimeoffset,
++      float: :float
++    }
++
+     defp prepare_raw_param(value) when is_binary(value) do
+       type = if String.printable?(value), do: :string, else: :binary
+       {value, type}
+@@ -142,6 +161,10 @@ if Code.ensure_loaded?(Tds) do
+ 
+     defp prepare_raw_param(value) when value == true, do: {1, :boolean}
+     defp prepare_raw_param(value) when value == false, do: {0, :boolean}
++
++    defp prepare_raw_param({nil, ecto_type}) when is_map_key(@typed_nil_params, ecto_type),
++      do: {nil, Map.fetch!(@typed_nil_params, ecto_type)}
++
+     defp prepare_raw_param({_, :varchar} = value), do: value
+     defp prepare_raw_param(value), do: {value, nil}
+ 
 -- 
-2.55.0
+2.54.0 (Apple Git-157)
 

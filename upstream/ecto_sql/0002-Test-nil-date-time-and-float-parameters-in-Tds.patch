@@ -1,25 +1,36 @@
-From f280bf01be1a8cd59140a4d07198df6f65683b96 Mon Sep 17 00:00:00 2001
+From 34004fe6ea296720456bd0832422b493f9de65ff Mon Sep 17 00:00:00 2001
 From: Jason Powell <jasoncpowell@protonmail.com>
-Date: Tue, 15 Sep 2026 13:58:44 -0400
+Date: Fri, 18 Sep 2026 13:20:19 -0400
 Subject: [PATCH 2/2] Test nil date, time and float parameters in Tds
 
-A unit test for the dumpers in test/ecto/type_test.exs, and an
-integration test that writes nil through Repo.update, Repo.insert_all,
-Repo.update_all and a type/2 cast for each affected column type.
+test/ecto/type_test.exs: the Tds dumpers tag a nil date, time,
+datetime and float with its Ecto type, and leave other types, non-nil
+values, arrays and a custom type with a :date primitive alone.
 
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+test/ecto/adapters/tds_test.exs: prepare_params/1 turns the tag into a
+%Tds.Parameter{} typed date, time, datetime2, datetimeoffset or float,
+numbers it in sequence with the other params, and still passes a bare
+nil through untyped.
+
+integration_test/tds/nil_parameters_test.exs: writes nil through
+Repo.update, Repo.insert_all, Repo.update_all and a type/2 cast for
+each affected column type, and through a custom type with a :date
+primitive on an integer column, whose NULL must stay untyped.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
 ---
- integration_test/tds/nil_parameters_test.exs | 101 +++++++++++++++++++
- test/ecto/type_test.exs                      |  24 +++++
- 2 files changed, 125 insertions(+)
+ integration_test/tds/nil_parameters_test.exs | 146 +++++++++++++++++++
+ test/ecto/adapters/tds_test.exs              |  31 ++++
+ test/ecto/type_test.exs                      |  50 +++++++
+ 3 files changed, 227 insertions(+)
  create mode 100644 integration_test/tds/nil_parameters_test.exs
 
 diff --git a/integration_test/tds/nil_parameters_test.exs b/integration_test/tds/nil_parameters_test.exs
 new file mode 100644
-index 0000000..aaae8f5
+index 0000000..6761222
 --- /dev/null
 +++ b/integration_test/tds/nil_parameters_test.exs
-@@ -0,0 +1,101 @@
+@@ -0,0 +1,146 @@
 +defmodule Ecto.Integration.NilParametersTest do
 +  use ExUnit.Case, async: true
 +
@@ -30,6 +41,9 @@ index 0000000..aaae8f5
 +  defmodule NilParametersMigration do
 +    use Ecto.Migration
 +
++    # :naive_datetime and :utc_datetime create legacy datetime columns, which
++    # accept an untyped NULL; the typed datetime2 and datetimeoffset NULLs sent
++    # for these fields must be accepted there too.
 +    def change do
 +      create table(:nil_parameters_test) do
 +        add :date_value, :date
@@ -41,8 +55,21 @@ index 0000000..aaae8f5
 +        add :utc_datetime_usec_value, :utc_datetime_usec
 +        add :datetimeoffset_value, :datetimeoffset
 +        add :float_value, :float
++        # for IntDate, a custom type with the :date primitive
++        add :int_date_value, :integer
 +      end
 +    end
++  end
++
++  # A custom type with the :date primitive that stores dates as YYYYMMDD
++  # integers in an int column.
++  defmodule IntDate do
++    use Ecto.Type
++
++    def type, do: :date
++    def cast(%Date{} = date), do: {:ok, date}
++    def load(int), do: {:ok, Date.new!(div(int, 10_000), rem(div(int, 100), 100), rem(int, 100))}
++    def dump(%Date{} = date), do: {:ok, date.year * 10_000 + date.month * 100 + date.day}
 +  end
 +
 +  defmodule NilParameters do
@@ -58,6 +85,7 @@ index 0000000..aaae8f5
 +      field :utc_datetime_usec_value, :utc_datetime_usec
 +      field :datetimeoffset_value, :utc_datetime_usec
 +      field :float_value, :float
++      field :int_date_value, IntDate
 +    end
 +  end
 +
@@ -73,6 +101,8 @@ index 0000000..aaae8f5
 +    float_value: 1.5
 +  }
 +
++  @int_date ~D[2024-01-01]
++
 +  @base_migration 3_000_000
 +
 +  setup_all do
@@ -85,8 +115,8 @@ index 0000000..aaae8f5
 +  end
 +
 +  # SQL Server rejects an untyped (varbinary) NULL for date, time, datetime2,
-+  # datetimeoffset and float columns, so these only pass when nil is sent as
-+  # a typed parameter.
++  # datetimeoffset and float columns, so apart from the two legacy datetime
++  # columns these only pass when nil is sent as a typed parameter.
 +  for field <- Map.keys(@values) do
 +    test "updates #{field} to nil" do
 +      row = PoolRepo.insert!(struct(NilParameters, @values))
@@ -120,40 +150,134 @@ index 0000000..aaae8f5
 +
 +    assert {1, _} = PoolRepo.update_all(query, [])
 +  end
++
++  # A custom type with a :date primitive is left alone: Ecto never calls its
++  # dump/1 for nil, so the adapter cannot know that its non-nil values are
++  # stored as integers. Its NULL still reaches the int column untyped, which
++  # SQL Server accepts; a NULL declared as date would be refused.
++  describe "a custom type with a :date primitive on an integer column" do
++    test "updates it to nil" do
++      row = PoolRepo.insert!(struct(NilParameters, Map.put(@values, :int_date_value, @int_date)))
++      assert PoolRepo.get!(NilParameters, row.id).int_date_value == @int_date
++
++      assert {:ok, _} = PoolRepo.update(Ecto.Changeset.change(row, int_date_value: nil))
++      assert PoolRepo.get!(NilParameters, row.id).int_date_value == nil
++    end
++
++    test "inserts nil with insert_all" do
++      assert {1, _} = PoolRepo.insert_all(NilParameters, [%{int_date_value: nil}])
++    end
++
++    test "sets it to nil with update_all" do
++      row = PoolRepo.insert!(struct(NilParameters, Map.put(@values, :int_date_value, @int_date)))
++      query = from(n in NilParameters, where: n.id == ^row.id)
++
++      assert {1, _} = PoolRepo.update_all(query, set: [int_date_value: nil])
++      assert PoolRepo.get!(NilParameters, row.id).int_date_value == nil
++    end
++  end
 +end
+diff --git a/test/ecto/adapters/tds_test.exs b/test/ecto/adapters/tds_test.exs
+index 2e94de1..e592a45 100644
+--- a/test/ecto/adapters/tds_test.exs
++++ b/test/ecto/adapters/tds_test.exs
+@@ -2145,6 +2145,37 @@ defmodule Ecto.Adapters.TdsTest do
+         SQL.prepare_params([%Tds.Parameter{name: "Param"}])
+       end
+     end
++
++    # SQL Server refuses a varbinary NULL, which is what a bare nil becomes, for
++    # these columns, so Ecto.Adapters.Tds tags such a nil with its Ecto type.
++    test "prepares tagged nil params with the type of their column" do
++      for {ecto_type, tds_type} <- [
++            date: :date,
++            time: :time,
++            time_usec: :time,
++            naive_datetime: :datetime2,
++            naive_datetime_usec: :datetime2,
++            utc_datetime: :datetimeoffset,
++            utc_datetime_usec: :datetimeoffset,
++            float: :float
++          ] do
++        assert SQL.prepare_params([{nil, ecto_type}]) == [
++                 %Tds.Parameter{name: "@1", value: nil, type: tds_type}
++               ]
++      end
++    end
++
++    test "numbers a tagged nil param in sequence" do
++      assert SQL.prepare_params([1, {nil, :date}, "a"]) == [
++               %Tds.Parameter{name: "@1", value: 1},
++               %Tds.Parameter{name: "@2", value: nil, type: :date},
++               %Tds.Parameter{name: "@3", value: "a", type: :string}
++             ]
++    end
++
++    test "prepares a bare nil param without a type" do
++      assert SQL.prepare_params([nil]) == [%Tds.Parameter{name: "@1", value: nil, type: nil}]
++    end
+   end
+ 
+   defp remove_newlines(string) when is_binary(string) do
 diff --git a/test/ecto/type_test.exs b/test/ecto/type_test.exs
-index 3f18deb..51b60e0 100644
+index 3f18deb..bdef828 100644
 --- a/test/ecto/type_test.exs
 +++ b/test/ecto/type_test.exs
-@@ -40,4 +40,28 @@ defmodule Ecto.TypeTest do
+@@ -40,4 +40,54 @@ defmodule Ecto.TypeTest do
      assert adapter_load(Tds, {:map, Elixir.Tds.Ecto.UUID}, %{"a" => @uuid_string}) ==
               {:ok, %{"a" => @uuid_string}}
    end
 +
-+  # SQL Server refuses an untyped (varbinary) NULL for these column types
-+  test "dumps nil as a typed parameter for Tds date, time and float types" do
-+    for {type, tds_type} <- [
-+          date: :date,
-+          time: :time,
-+          time_usec: :time,
-+          naive_datetime: :datetime2,
-+          naive_datetime_usec: :datetime2,
-+          utc_datetime: :datetimeoffset,
-+          utc_datetime_usec: :datetimeoffset,
-+          float: :float
-+        ] do
-+      assert adapter_dump(Tds, type, nil) ==
-+               {:ok, %Elixir.Tds.Parameter{value: nil, type: tds_type}}
-+    end
++  # SQL Server refuses a varbinary NULL, which is what a bare nil becomes, for
++  # these columns; the Tds connection declares the type from the tag instead.
++  @tds_tagged_nil_types [
++    :date,
++    :time,
++    :time_usec,
++    :naive_datetime,
++    :naive_datetime_usec,
++    :utc_datetime,
++    :utc_datetime_usec,
++    :float
++  ]
 +
++  test "tags nil with its type for Tds date, time and float types" do
++    for type <- @tds_tagged_nil_types do
++      assert adapter_dump(Tds, type, nil) == {:ok, {nil, type}}
++    end
++  end
++
++  test "dumps nil as nil for other Tds types" do
 +    for type <- [:integer, :boolean, :decimal, :string, :binary, :binary_id, :map] do
 +      assert adapter_dump(Tds, type, nil) == {:ok, nil}
 +    end
++  end
 +
++  test "does not tag non-nil Tds values" do
 +    assert adapter_dump(Tds, :date, ~D[2024-01-01]) == {:ok, ~D[2024-01-01]}
 +    assert adapter_dump(Tds, :float, 1.5) == {:ok, 1.5}
 +  end
++
++  test "leaves nil inside a Tds array to the array dumper" do
++    assert adapter_dump(Tds, {:array, :date}, [nil]) == {:ok, [nil]}
++  end
++
++  defmodule IntDate do
++    use Ecto.Type
++
++    def type, do: :date
++    def cast(%Date{} = date), do: {:ok, date}
++    def load(int), do: {:ok, Date.new!(div(int, 10_000), rem(div(int, 100), 100), rem(int, 100))}
++    def dump(%Date{} = date), do: {:ok, date.year * 10_000 + date.month * 100 + date.day}
++  end
++
++  # Ecto never calls a custom type's dump/1 for nil, so the adapter cannot know
++  # that this type stores its non-nil values as integers.
++  test "does not tag nil for a custom Tds type with a :date primitive" do
++    assert adapter_dump(Tds, IntDate, ~D[2024-01-01]) == {:ok, 20_240_101}
++    assert adapter_dump(Tds, IntDate, nil) == {:ok, nil}
++  end
  end
 -- 
-2.55.0
+2.54.0 (Apple Git-157)
 
