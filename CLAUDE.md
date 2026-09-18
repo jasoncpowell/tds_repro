@@ -15,20 +15,26 @@ varbinary. Background is in `docs/root-cause.md` and `docs/upstream-history.md`.
 - `bin/compare`: both of the above checks, with a summary.
 - `bin/verify-upstream`: applies `upstream/ecto_sql/*.patch` to ecto_sql master
   and runs the upstream tests with and without the fix.
+- `bin/compile-without-tds`: compiles the vendored adapter with tds absent;
+  must pass. Needs no SQL Server.
 - `mix format --check-formatted`: must pass.
 - `MSSQL_PORT` / `MSSQL_HOST` change the SQL Server connection for all of the
   above.
 
 ## Layout and rules
 
-- `vendor/ecto_sql` is ecto_sql 3.14.0 from Hex. Only the fix commit touches
-  it; keep any change to it in its own commit so `git log -p -- vendor/ecto_sql`
-  shows exactly the upstream change.
+- `vendor/ecto_sql` is ecto_sql 3.14.0 from Hex. Only the fix commits touch
+  it, each change in its own commit, so `git log -p -- vendor/ecto_sql` shows
+  exactly the upstream change. The upstream patch is the squash of them.
 - `upstream/ecto_sql/` holds the patch series for elixir-ecto/ecto_sql: the fix
   and its tests, generated with `git format-patch` from an ecto_sql checkout
-  where they passed. The `lib/ecto/adapters/tds.ex` hunk must stay identical to
-  the vendored fix. Regenerate the patches rather than editing them by hand, and
+  where they passed. The `lib/ecto/adapters/tds.ex` and
+  `lib/ecto/adapters/tds/connection.ex` hunks must stay identical to the
+  vendored fix. Regenerate the patches rather than editing them by hand, and
   rerun `bin/verify-upstream` afterwards.
+- `lib/ecto/adapters/tds.ex` must compile without tds
+  (`bin/compile-without-tds`); never expand a Tds struct there. Only the
+  guarded connection and types modules may.
 - `ECTO_SQL=upstream` builds into `_build_upstream` so the two ecto_sql
   versions never share compiled code.
 - Tests tagged `:bug` fail on released ecto_sql and pass with the fix. Every
