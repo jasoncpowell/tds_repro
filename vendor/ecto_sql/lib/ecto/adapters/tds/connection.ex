@@ -135,6 +135,25 @@ if Code.ensure_loaded?(Tds) do
     defp prepare_param(%{} = value), do: {json_library().encode!(value), :string}
     defp prepare_param(value), do: prepare_raw_param(value)
 
+    # Ecto.Adapters.Tds.dumpers/2 tags a nil of these Ecto types with the type,
+    # because an untyped NULL is declared as varbinary, which date, time,
+    # datetime2, datetimeoffset, float and real columns refuse. Declare it as
+    # the type prepare_param/1 uses for a non-nil date or time value of the
+    # same Ecto type, or as :float, the type the driver infers for a non-nil
+    # float. The driver declares a nil :float as decimal(1,0), which SQL Server
+    # converts implicitly to float and real. Compare ecto_to_db/5, which maps
+    # the same Ecto types to the column types migrations create.
+    @typed_nil_params %{
+      date: :date,
+      time: :time,
+      time_usec: :time,
+      naive_datetime: :datetime2,
+      naive_datetime_usec: :datetime2,
+      utc_datetime: :datetimeoffset,
+      utc_datetime_usec: :datetimeoffset,
+      float: :float
+    }
+
     defp prepare_raw_param(value) when is_binary(value) do
       type = if String.printable?(value), do: :string, else: :binary
       {value, type}
@@ -142,6 +161,10 @@ if Code.ensure_loaded?(Tds) do
 
     defp prepare_raw_param(value) when value == true, do: {1, :boolean}
     defp prepare_raw_param(value) when value == false, do: {0, :boolean}
+
+    defp prepare_raw_param({nil, ecto_type}) when is_map_key(@typed_nil_params, ecto_type),
+      do: {nil, Map.fetch!(@typed_nil_params, ecto_type)}
+
     defp prepare_raw_param({_, :varchar} = value), do: value
     defp prepare_raw_param(value), do: {value, nil}
 
