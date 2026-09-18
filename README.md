@@ -19,8 +19,8 @@ both still open.
 | | |
 |---|---|
 | **Bug** | Reproduces on the latest releases (ecto_sql 3.14.0, ecto 3.14.2, tds 2.3.8) and on ecto_sql master, against SQL Server 2017, 2019 and 2022. |
-| **Fix** | 13 lines in `Ecto.Adapters.Tds.dumpers/2` (commit `4d570f4`), applied to the copy of ecto_sql in [`vendor/ecto_sql`](vendor/ecto_sql). All 100 tests in this repo pass with it. |
-| **Upstream PR** | Ready, not submitted. The fix and its tests are in [`upstream/ecto_sql/`](upstream/ecto_sql) and pass on ecto_sql master: ecto_sql's full unit suite, and its full Tds integration suite against SQL Server 2017, 2019 and 2022, with no regressions. See the [PR draft](docs/pr-draft.md) and [how to submit it](docs/creating-the-pr.md). |
+| **Fix** | Two small changes to ecto_sql's Tds adapter: `Ecto.Adapters.Tds.dumpers/2` tags a nil of the affected Ecto types with its type, and `Ecto.Adapters.Tds.Connection.prepare_params/1` turns the tag into a typed `%Tds.Parameter{}`. Applied to the copy of ecto_sql in [`vendor/ecto_sql`](vendor/ecto_sql) (`git log -p -- vendor/ecto_sql` shows it). All 121 tests in this repo pass with it. |
+| **Upstream PR** | Ready, not submitted. The fix and its tests are in [`upstream/ecto_sql/`](upstream/ecto_sql) and pass on ecto_sql master: ecto_sql's full unit suite, and its full Tds integration suite against SQL Server 2022, with no regressions (the first version of the fix also passed on 2017 and 2019). See the [PR draft](docs/pr-draft.md) and [how to submit it](docs/creating-the-pr.md). |
 
 ## Who is affected
 
@@ -71,11 +71,11 @@ each result:
 
 ```
 Released ecto_sql 3.14.0 (ECTO_SQL=upstream)
-  ok    the bug reproduces: every :bug test fails (33 of 33 failed)
-  ok    every other test passes (0 of 67 failed)
+  ok    the bug reproduces: every :bug test fails (42 of 42 failed)
+  ok    every other test passes (0 of 79 failed)
 
 Vendored ecto_sql with the fix
-  ok    every test passes (0 of 100 failed)
+  ok    every test passes (0 of 121 failed)
 ```
 
 If port 1433 is taken, pick another and pass it to every command, for example
@@ -131,9 +131,9 @@ With the fix, every line reads `works` and it ends with `0 of 10 writes hit the 
 ### Tests
 
 ```sh
-mix test                                   # with the fix: all 100 pass
-ECTO_SQL=upstream mix test --only bug      # released: all 33 fail
-ECTO_SQL=upstream mix test --exclude bug   # released: the other 67 pass
+mix test                                   # with the fix: all 121 pass
+ECTO_SQL=upstream mix test --only bug      # released: all 42 fail
+ECTO_SQL=upstream mix test --exclude bug   # released: the other 79 pass
 ```
 
 Tests tagged `:bug` fail on released ecto_sql and pass with the fix. Everything
@@ -141,9 +141,9 @@ else passes on both.
 
 | File | Covers |
 |---|---|
-| [`dumpers_test.exs`](test/tds_repro/dumpers_test.exs) | How the adapter dumps nil, without a database. |
-| [`nil_values_test.exs`](test/tds_repro/nil_values_test.exs) | Writing nil through `Repo.update`, `Repo.insert_all` and `Repo.update_all` for 25 combinations of Ecto field type and column type, plus checks that nothing else changed. |
-| [`known_limitations_test.exs`](test/tds_repro/known_limitations_test.exs) | What the fix doesn't cover, asserted so a change in behaviour is noticed. |
+| [`dumpers_test.exs`](test/tds_repro/dumpers_test.exs) | How the adapter dumps nil and how the connection prepares the parameter, without a database. |
+| [`nil_values_test.exs`](test/tds_repro/nil_values_test.exs) | Writing nil through `Repo.update`, `Repo.insert_all` and `Repo.update_all` for 24 of the 26 field type and column type combinations in [`TdsRepro.AllTypes`](lib/tds_repro/all_types.ex) (25 combinations of built-in types, plus the custom [`TdsRepro.IntDate`](lib/tds_repro/int_date.ex) type on an `int` column; the two `text`/`ntext` combinations are in `known_limitations_test.exs`), plus checks that nothing else changed. |
+| [`known_limitations_test.exs`](test/tds_repro/known_limitations_test.exs) | What the fix doesn't cover, asserted so a change in behaviour is noticed, and why custom types are left alone. |
 | [`workarounds_test.exs`](test/tds_repro/workarounds_test.exs) | What works on released ecto_sql today. |
 
 Tests use their own `tds_repro_test` database, created and migrated by
@@ -152,8 +152,14 @@ Tests use their own `tds_repro_test` database, created and migrated by
 ### The fix itself
 
 ```sh
-git show 4d570f4
+git log -p -- vendor/ecto_sql
 ```
+
+Two commits after the vendoring one: `4d570f4`, the first version, which built
+a `%Tds.Parameter{}` in the adapter's dumpers, and the one that follows it,
+which moves the struct into the connection so the adapter compiles without
+tds, leaves custom types alone and documents how the driver sends a nil float.
+[docs/root-cause.md](docs/root-cause.md#the-fix) explains both.
 
 ## Verifying the upstream patches
 
@@ -170,18 +176,45 @@ Cloning https://github.com/elixir-ecto/ecto_sql.git
   ok    patches apply (2 patches)
 
 With the fix
-  ok    unit test passes (0 of 3 failed)
-  ok    integration test passes (0 of 28 failed)
+  ok    unit tests pass (0 of 138 failed)
+  ok    integration test passes (0 of 31 failed)
 
-Without the fix (lib/ecto/adapters/tds.ex from before the fix commit)
-  ok    unit test fails (1 of 3 failed)
-  ok    integration test fails (22 of 28 failed)
+Without the fix (lib/ecto/adapters/tds.ex and tds/connection.ex from before the fix commit)
+  ok    unit tests fail (3 of 138 failed)
+  ok    integration test fails (22 of 31 failed)
 ```
 
 The `at` line shows whichever ecto_sql master commit was cloned. The script
 needs network access, and ecto_sql's integration tests drop and recreate a
-database named `ecto_test` on your SQL Server. The full results against
-SQL Server 2017, 2019 and 2022 are in the [PR draft](docs/pr-draft.md#verification-log).
+database named `ecto_test` on your SQL Server. The full results are in the
+[PR draft](docs/pr-draft.md#verification-log).
+
+### Compiling without tds
+
+tds is an optional dependency of ecto_sql, and `lib/ecto/adapters/tds.ex` is
+compiled in every ecto_sql install, including apps that only use Postgres.
+Unlike the connection module it has no `Code.ensure_loaded?(Tds)` guard, so a
+reference to `Tds.Parameter` in it breaks those apps at compile time. The first
+version of the fix did exactly that. ecto_sql's own test suite always has tds
+available and can't catch it, so this repo checks it directly:
+
+```sh
+bin/compile-without-tds
+```
+
+It compiles the vendored adapter files with tds absent from the code path and
+needs no SQL Server:
+
+```
+  ok    adapter compiles without tds (2 warnings about Tds functions, same as released ecto_sql)
+  ok    guarded modules are skipped without tds (wrote Elixir.Ecto.Adapters.Tds.beam)
+  ok    no new warnings (2 warnings, released ecto_sql has 2)
+```
+
+The two warnings are for `Tds.json_library/0` and `Tds.start_link/1`, which
+`Ecto.Adapters.Tds` calls at runtime; released ecto_sql 3.14.0 has the same
+two. The check fails on a compile error, on a guarded module being compiled, or
+on a third warning.
 
 ## Scripts
 
@@ -241,3 +274,5 @@ The same change, plus tests in ecto_sql's own test suite, is in
   against the pinned SQL Server 2022 image, plus a formatting check.
 - `bin/verify-upstream` against ecto_sql master and SQL Server 2019, on every
   push and weekly, to catch changes on master that break the patches.
+- `bin/compile-without-tds` on Elixir 1.20, without SQL Server, as the job
+  "Adapter compiles without tds".
