@@ -1,7 +1,11 @@
 # References
 
 Everything the docs in this repo rely on, grouped by source, with what each one
-supports. Checked on 2026-09-15.
+supports. Checked on 2026-09-15, except the rows added for the restructured fix
+(the optional tds dependency, the `Code.ensure_loaded?(Tds)` guards,
+`prepare_params/1`, the `{_, :varchar}` clause, `Tds.Ecto.VarChar`, the driver's
+float encoding, `Ecto.Type.dump/3`, the `Ecto.Type` docs and Elixir's struct
+docs), which were checked on 2026-09-18.
 
 ## Upstream reports and discussion
 
@@ -36,11 +40,19 @@ supports. Checked on 2026-09-15.
 | tds [`parameter.ex#L79-L88`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L79-L88) | Explicit types are kept; untyped nil becomes `:binary`. |
 | tds [`parameter.ex#L119-L122`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L119-L122) | Non-nil floats are typed `:float`. |
 | tds [`types.ex#L978`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L978) | Parameter declarations are built from the type. |
+| tds [`types.ex#L923-L925`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L923-L925), [`#L1150`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L1150) | A `:float` parameter with a nil value is declared as `decimal(1,0)` (`encode_float_descriptor/1`); its value goes through the decimal encoder, which sends a nil as a varbinary NULL (`encode_float_type/1`). |
 | tds [`protocol.ex#L198`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/protocol.ex#L198), [`#L569`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/protocol.ex#L569) | Statements are prepared with `sp_prepare` by default. |
 | ecto_sql [`tds.ex#L155-L157`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds.ex#L155-L157) (v3.14.0) | The dumpers the fix changes. |
 | ecto_sql [`connection.ex#L102-L123`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L102-L123), [`#L146`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L146) | Parameter types come from values; typed parameters pass through; nil gets no type. |
+| ecto_sql [`connection.ex#L79-L95`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L79-L95) | `prepare_params/1` builds and numbers a `%Tds.Parameter{}` for every parameter; the fix's tagged nil takes this path. |
+| ecto_sql [`connection.ex#L145`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L145) | The existing `prepare_raw_param/1` clause for the `{_, :varchar}` tag; the fix's clause for `{nil, ecto_type}` sits just before it. |
+| ecto_sql [`types.ex#L287-L289`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L287-L289) | `Tds.Ecto.VarChar.dump/1` returns `{value, :varchar}`, the tagging convention the fix reuses for nil. |
+| ecto_sql [`connection.ex#L1`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L1), [`types.ex#L1`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L1) | The connection and the `Tds.Ecto.*` types compile only when `Tds` is loaded; `lib/ecto/adapters/tds.ex` has no such guard. |
+| ecto_sql [`mix.exs#L111`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/mix.exs#L111) (v3.14.0) | tds is an optional dependency, so the adapter must compile without it and can't build a `%Tds.Parameter{}`. |
 | ecto_sql [`connection.ex#L1825-L1842`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L1825-L1842) | Column types migrations create for date, time and float fields. |
 | ecto [`type.ex#L1041-L1049`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L1041-L1049) (v3.14.2) | `adapter_dump/3` runs the adapter's dumpers, including for nil. |
+| ecto [`type.ex#L542-L544`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L542-L544) | `Ecto.Type.dump/3` returns `{:ok, nil}` before calling a custom type's `dump/1`; why the fix leaves custom types alone. |
+| ecto [`type.ex#L538-L540`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L538-L540) | A parameterized type's `dump/3` runs before that nil short-circuit, so `Ecto.ParameterizedType` handles its own nil. |
 | ecto [`repo/schema.ex#L1365-L1366`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo/schema.ex#L1365-L1366), [`query/planner.ex#L2638`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/query/planner.ex#L2638) | Changes and query parameters are dumped through the adapter. |
 | ecto [`changeset/relation.ex#L647-L649`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/changeset/relation.ex#L647-L649) | Inserts only include non-nil struct fields. |
 | [elixir-ecto/ecto#4214](https://github.com/elixir-ecto/ecto/pull/4214) (Ecto 3.11.0) | Adapters receive nil in dumpers and loaders; required for the fix. |
@@ -55,6 +67,8 @@ supports. Checked on 2026-09-15.
 | Reference | Supports |
 |---|---|
 | [`Ecto.Adapter` `dumpers/2`](https://ecto.hexdocs.pm/Ecto.Adapter.html#c:dumpers/2) | What dumpers receive and return. |
+| [`Ecto.Type`](https://ecto.hexdocs.pm/Ecto.Type.html#module-example), [`type/0`](https://ecto.hexdocs.pm/Ecto.Type.html#c:type/0) | Custom types: "nil values are always bypassed and cannot be handled by custom types"; `type/0` gives the underlying primitive. |
+| Elixir [Structs](https://hexdocs.pm/elixir/structs.html) | Structs "provide compile-time checks": a `%Tds.Parameter{}` literal needs the module at compile time. |
 | [`Ecto.Repo` `insert/2`](https://ecto.hexdocs.pm/Ecto.Repo.html#c:insert/2) | Structs become changesets "with all non-nil fields". |
 | [`Ecto.Repo` `update_all/3`](https://ecto.hexdocs.pm/Ecto.Repo.html#c:update_all/3), [`insert_all/3`](https://ecto.hexdocs.pm/Ecto.Repo.html#c:insert_all/3) | Neither updates autogenerated fields such as timestamps. |
 | [`Ecto.Query.API` `type/2`](https://ecto.hexdocs.pm/Ecto.Query.API.html#type/2) | Casting a parameter at the database level. |

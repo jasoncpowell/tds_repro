@@ -151,23 +151,44 @@ defmodule Ecto.Adapters.Tds do
   def loaders(:binary_id, type), do: [Tds.Ecto.UUID, type]
   def loaders(_, type), do: [type]
 
+  # Ecto types whose columns refuse a NULL declared as varbinary; see tag_nil/2.
+  @tagged_nil_types [
+    :date,
+    :time,
+    :time_usec,
+    :naive_datetime,
+    :naive_datetime_usec,
+    :utc_datetime,
+    :utc_datetime_usec,
+    :float
+  ]
+
   @impl true
   def dumpers({:map, _}, type), do: [&Ecto.Type.embedded_dump(type, &1, :json)]
   def dumpers(:binary_id, type), do: [type, Tds.Ecto.UUID]
-  def dumpers(:date, type), do: [type, &typed_nil(&1, :date)]
-  def dumpers(:time, type), do: [type, &typed_nil(&1, :time)]
-  def dumpers(:time_usec, type), do: [type, &typed_nil(&1, :time)]
-  def dumpers(:naive_datetime, type), do: [type, &typed_nil(&1, :datetime2)]
-  def dumpers(:naive_datetime_usec, type), do: [type, &typed_nil(&1, :datetime2)]
-  def dumpers(:utc_datetime, type), do: [type, &typed_nil(&1, :datetimeoffset)]
-  def dumpers(:utc_datetime_usec, type), do: [type, &typed_nil(&1, :datetimeoffset)]
-  def dumpers(:float, type), do: [type, &typed_nil(&1, :float)]
+  def dumpers(type, type) when type in @tagged_nil_types, do: [type, &tag_nil(&1, type)]
   def dumpers(_, type), do: [type]
 
-  # A bare nil reaches the driver untyped and is sent as varbinary, which SQL
-  # Server refuses to convert implicitly to date/time and float columns.
-  defp typed_nil(nil, tds_type), do: {:ok, %Tds.Parameter{value: nil, type: tds_type}}
-  defp typed_nil(value, _tds_type), do: {:ok, value}
+  # A nil has no type of its own. Left bare, it reaches the driver untyped and
+  # is declared as varbinary (Tds.Parameter.fix_data_type/1), which SQL Server
+  # won't convert implicitly to date, time, datetime2, datetimeoffset, float or
+  # real columns (errors 257 and 206). So tag the nil with its Ecto type, the
+  # way Tds.Ecto.VarChar tags values with :varchar, and let
+  # Ecto.Adapters.Tds.Connection.prepare_params/1 turn it into a typed
+  # parameter. This module compiles without the optional tds dependency, so it
+  # can't build a %Tds.Parameter{} itself.
+  #
+  # Only built-in types are tagged: the dumpers/2 clause above matches the Ecto
+  # type against its own primitive. A custom type with one of these primitives
+  # may store non-nil values in another representation, and Ecto never calls
+  # its dump/1 for nil, so its nil stays bare and is handled as before.
+  #
+  # :string is left alone on purpose. Typing a nil string as nvarchar would fix
+  # legacy text and ntext columns but break :string fields stored in varbinary
+  # columns, which is why the same fallback was rejected for the driver in
+  # elixir-ecto/tds#162.
+  defp tag_nil(nil, type), do: {:ok, {nil, type}}
+  defp tag_nil(value, _type), do: {:ok, value}
 
   defp bool_decode(<<0>>), do: {:ok, false}
   defp bool_decode(<<1>>), do: {:ok, true}

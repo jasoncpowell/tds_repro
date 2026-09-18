@@ -84,7 +84,7 @@ defmodule TdsRepro do
     version = Application.spec(:ecto_sql, :vsn)
 
     case Ecto.Type.adapter_dump(Ecto.Adapters.Tds, :date, nil) do
-      {:ok, %Tds.Parameter{}} -> "ecto_sql #{version} with the fix (vendor/ecto_sql)"
+      {:ok, {nil, :date}} -> "ecto_sql #{version} with the fix (vendor/ecto_sql)"
       {:ok, nil} -> "ecto_sql #{version} as released (ECTO_SQL=upstream)"
     end
   end
