@@ -314,6 +314,12 @@ if Code.ensure_loaded?(Tds) do
           {field, nil}, acc ->
             {[quote_name(field), " IS NULL"], acc + 1}
 
+          # Ecto.Adapters.Tds.dumpers/2 tags a nil with its Ecto type. A filter
+          # still has to compare with IS NULL: comparing with a NULL parameter
+          # is never true, and the row would never match.
+          {field, {nil, _ecto_type}}, acc ->
+            {[quote_name(field), " IS NULL"], acc + 1}
+
           {field, _value}, acc ->
             {[quote_name(field), " = @", Integer.to_string(acc)], acc + 1}
 
@@ -336,6 +342,12 @@ if Code.ensure_loaded?(Tds) do
       {filters, _} =
         intersperse_reduce(filters, " AND ", 1, fn
           {field, nil}, acc ->
+            {[quote_name(field), " IS NULL"], acc + 1}
+
+          # Ecto.Adapters.Tds.dumpers/2 tags a nil with its Ecto type. A filter
+          # still has to compare with IS NULL: comparing with a NULL parameter
+          # is never true, and the row would never match.
+          {field, {nil, _ecto_type}}, acc ->
             {[quote_name(field), " IS NULL"], acc + 1}
 
           {field, _value}, acc ->
