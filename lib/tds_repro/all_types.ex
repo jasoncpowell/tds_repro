@@ -2,7 +2,7 @@ defmodule TdsRepro.AllTypes do
   @moduledoc """
   One nullable column for each combination of Ecto field type and SQL Server
   column type that the test suite writes nil to. The table is created by the
-  `CreateAllTypes` migration.
+  `CreateAllTypes` and `AddIntDateToAllTypes` migrations.
   """
   use Ecto.Schema
 
@@ -39,7 +39,11 @@ defmodule TdsRepro.AllTypes do
     {:float_real, :float, "real", 1.5},
     {:naive_datetime_smalldatetime, :naive_datetime, "smalldatetime", ~N[2026-01-01 09:30:00]},
     {:utc_datetime_usec_datetimeoffset, :utc_datetime_usec, "datetimeoffset",
-     ~U[2026-01-01 09:30:00.123456Z]}
+     ~U[2026-01-01 09:30:00.123456Z]},
+
+    # A custom type whose primitive is :date but whose column is int, so a NULL
+    # declared as date would be refused. The fix leaves custom types alone.
+    {:int_date_int, TdsRepro.IntDate, "int", ~D[2026-01-01]}
   ]
 
   @doc "The `{field, ecto_type, column_type, sample_value}` combinations."

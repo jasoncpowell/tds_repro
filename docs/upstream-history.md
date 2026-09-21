@@ -35,13 +35,13 @@ Both issues are still open, and neither links to a PR.
 | Point raised | By | Response |
 |---|---|---|
 | Setting date/time fields to nil fails, including via `insert_all` | puruzio, enrico, jaybarra | Fixed for every Ecto date/time type, on `Repo.update`, `insert_all` and `update_all`. |
-| The fix may belong in Ecto's adapter, not the driver | mjaric | The change is in `Ecto.Adapters.Tds.dumpers/2`, in ecto_sql. |
-| Changing the driver's fallback breaks other column types | rschenk, wojtekmach, mjaric | The fallback is untouched. Types other than date/time and float dump exactly as before. |
+| The fix may belong in Ecto's adapter, not the driver | mjaric | The change is in ecto_sql: `Ecto.Adapters.Tds.dumpers/2` tags the nil with its Ecto type, and `Ecto.Adapters.Tds.Connection.prepare_params/1` declares the parameter type. |
+| Changing the driver's fallback breaks other column types | rschenk, wojtekmach, mjaric | The fallback is untouched. Types other than the built-in date/time and float types, custom types included, dump exactly as before. |
 | `:binary_id` support matters most | mjaric | Unaffected: UUID columns accept nil before and after. |
 | NULL can't be encoded without a type; a hint is required | mjaric | The hint comes from the schema field's Ecto type. Nothing is inferred from the nil. |
 | Calendar types, float, "and potentially others" | wojtekmach | All calendar types and float are fixed. The only other failure found is `:string` fields on legacy `text`/`ntext` columns, which the fix doesn't cover. |
 | Do some code paths drop the type before the driver? | mjaric | Ecto passes every schema-typed value through the adapter's dumpers (since ecto#4214), so updates, `insert_all` and `update_all` all get typed. Values with no type (queries on a table name, `fragment`, raw SQL) still fail, as before. |
-| Don't rely on implicit conversion | mjaric | No new conversions: nils get the same parameter types ecto_sql already sends for non-nil values of those fields. |
+| Don't rely on implicit conversion | mjaric | Date and time nils get the same parameter types ecto_sql already sends for non-nil values of those fields. A nil float is declared `:float`, which the driver declares as `decimal(1,0)`; SQL Server converts that to `float` and `real` implicitly, the one conversion the fix relies on. |
 | `type(^value, :date)` means giving up changesets | abueloshika | Changesets work without it. The fix also makes `type(^nil, :float)` work, which fails today (error 529). |
 | Tests passed without exercising the changed code | rschenk | This repo's tests go through `Ecto.Type.adapter_dump/3` and real `Repo` calls against SQL Server, and the upstream tests do the same. |
 | Driver rewrite in progress | mjaric (tds#183) | Compatible: the rewrite still honors an explicitly typed parameter. |

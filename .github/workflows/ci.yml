@@ -104,3 +104,32 @@ jobs:
       - name: Show test output
         if: failure()
         run: tail -n 200 tmp/verify-upstream/*.log
+
+  compile-without-tds:
+    # tds is an optional dependency of ecto_sql, and lib/ecto/adapters/tds.ex is
+    # compiled in every installation, including ones without tds. ecto_sql's own
+    # CI always has tds, so it cannot catch a Tds struct expanded in that file.
+    name: Adapter compiles without tds
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20.4"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-compile-without-tds-1.20.4-${{ hashFiles('mix.lock', 'vendor/ecto_sql/**') }}
+
+      - name: Compile the adapter without tds
+        run: bin/compile-without-tds
+
+      - name: Show compile output
+        if: failure()
+        run: tail -n 200 tmp/compile-without-tds/*.log

@@ -10,10 +10,13 @@ repo owner agrees.
 
 The two patches in [`upstream/ecto_sql/`](../upstream/ecto_sql):
 
-1. **The fix:** `lib/ecto/adapters/tds.ex`, identical to the vendored fix in
-   this repo.
-2. **Tests:** a unit test in `test/ecto/type_test.exs`, next to the existing
-   Tds `adapter_dump` tests, and `integration_test/tds/nil_parameters_test.exs`,
+1. **The fix:** `lib/ecto/adapters/tds.ex` (the dumpers tag a nil with its
+   Ecto type) and `lib/ecto/adapters/tds/connection.ex` (`prepare_params/1`
+   turns the tag into a typed `%Tds.Parameter{}`), identical to the vendored
+   fix in this repo.
+2. **Tests:** unit tests in `test/ecto/type_test.exs`, next to the existing
+   Tds `adapter_dump` tests, and in `test/ecto/adapters/tds_test.exs` for
+   `prepare_params/1`, plus `integration_test/tds/nil_parameters_test.exs`,
    modeled on `integration_test/tds/constraints_test.exs`.
 
 No CHANGELOG entry: every CHANGELOG commit in ecto_sql is by the maintainer,
@@ -36,6 +39,20 @@ bin/verify-upstream
 It clones ecto_sql master, applies the patches, runs the new tests with the fix
 (they must pass) and without it (they must fail). Every line must read `ok`.
 
+Also run:
+
+```sh
+bin/compile-without-tds
+```
+
+It compiles the vendored adapter with tds absent from the code path. tds is an
+optional dependency of ecto_sql and `lib/ecto/adapters/tds.ex` has no
+`Code.ensure_loaded?(Tds)` guard, so a reference to `Tds.Parameter` there
+breaks every ecto_sql user without the driver. ecto_sql's own suite always has
+tds available and cannot catch this. The `lib/ecto/adapters/tds.ex` hunk in
+patch 1 is identical to the vendored file, so checking the vendored copy checks
+the patch.
+
 If the patches no longer apply because master changed, apply them by hand in
 `tmp/verify-upstream/ecto_sql`, resolve the conflict, rerun the tests there,
 then regenerate the patches from that checkout and commit them to this repo:
@@ -43,6 +60,13 @@ then regenerate the patches from that checkout and commit them to this repo:
 ```sh
 git -C tmp/verify-upstream/ecto_sql format-patch origin/master..HEAD -o "$PWD/upstream/ecto_sql"
 ```
+
+The outgoing commits carry `Co-authored-by: Claude <noreply@anthropic.com>`:
+unversioned, because a product version dates the commit and means nothing to a
+reviewer, and lowercase, because that is the spelling every one of the 15
+co-author trailers in ecto_sql's history uses. Keep that form when regenerating
+the patches; `git format-patch` reproduces whatever the commits say, so check
+the trailers after any rebase or amend.
 
 ## 2. Fork and clone ecto_sql (confirm)
 

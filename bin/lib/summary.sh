@@ -1,5 +1,5 @@
-# Helpers shared by bin/compare and bin/verify-upstream. Callers set `status=0`
-# before using `report`.
+# Helpers shared by the scripts in bin/. Callers set `status=0` before using
+# `report`.
 
 # Prints "<tests run> <failures>" from the ExUnit summary in the given log.
 # Elixir 1.20+ prints "Result: 67 passed, 33 excluded" or "Result: 0/33 passed";

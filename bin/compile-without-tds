@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Checks that the vendored Tds adapter compiles when tds is not installed.
+#
+# tds is an optional dependency of ecto_sql, but lib/ecto/adapters/tds.ex is
+# compiled in every ecto_sql installation, including the Postgres-only apps
+# that never add tds. A struct literal expands at compile time, so a
+# %Tds.Parameter{} in that file broke the build for all of them:
+# "Tds.Parameter.__struct__/1 is undefined, cannot expand struct
+# Tds.Parameter". ecto_sql's own CI always has tds, so it cannot catch this.
+# lib/ecto/adapters/tds/connection.ex and tds/types.ex are wrapped in
+# `if Code.ensure_loaded?(Tds)` and are skipped without it; only the adapter
+# has to stay free of Tds structs.
+#
+#   bin/compile-without-tds
+#
+# Compiles the three files with elixirc against the project's compiled
+# dependencies, with tds left off the code path. The released adapter warns
+# twice about Tds functions it calls at runtime (Tds.json_library/0 and
+# Tds.start_link/1); those are expected. Needs no SQL Server. Output is
+# written to tmp/compile-without-tds/.
+set -uo pipefail
+cd "$(dirname "$0")/.."
+source bin/lib/summary.sh
+
+work=tmp/compile-without-tds
+ebin=$work/ebin
+log=$work/compile.log
+status=0
+
+# Everything the adapter files reference at compile time. tds is deliberately
+# missing.
+deps=(ecto ecto_sql db_connection decimal telemetry jason)
+files=(
+  vendor/ecto_sql/lib/ecto/adapters/tds.ex
+  vendor/ecto_sql/lib/ecto/adapters/tds/connection.ex
+  vendor/ecto_sql/lib/ecto/adapters/tds/types.ex
+)
+# The warnings released ecto_sql 3.14.0 has; a third one is a new problem.
+expected_warnings=2
+
+rm -rf "$work" && mkdir -p "$ebin"
+
+# Fetches and compiles the deps into _build/dev/lib/<dep>/ebin. ECTO_SQL=vendored
+# keeps the build in _build even if the caller's shell has ECTO_SQL=upstream.
+if ! ECTO_SQL=vendored mix deps.get >"$work/deps.log" 2>&1; then
+  echo "mix deps.get failed:" >&2
+  tail -n 40 "$work/deps.log" >&2
+  echo "Full output is in $work/deps.log." >&2
+  exit 1
+fi
+
+if ! ECTO_SQL=vendored MIX_ENV=dev mix compile >"$work/mix-compile.log" 2>&1; then
+  echo "mix compile failed:" >&2
+  tail -n 40 "$work/mix-compile.log" >&2
+  echo "Full output is in $work/mix-compile.log." >&2
+  exit 1
+fi
+
+code_paths=()
+for dep in "${deps[@]}"; do
+  code_paths+=(-pa "_build/dev/lib/$dep/ebin")
+done
+
+# The ecto_sql ebin already holds Ecto.Adapters.Tds, hence --ignore-module-conflict.
+elixirc --ignore-module-conflict "${code_paths[@]}" -o "$ebin" "${files[@]}" >"$log" 2>&1
+compiled=$?
+
+errors=$(grep -c 'error:' "$log")
+warnings=$(grep -c 'warning:' "$log")
+tds_warnings=$(grep 'warning:' "$log" | grep -c 'Tds\.')
+produced=$(ls "$ebin" | paste -sd ' ' -)
+
+if [ "$tds_warnings" -eq "$expected_warnings" ]; then
+  detail="$tds_warnings warnings about Tds functions, same as released ecto_sql"
+else
+  detail="$tds_warnings warnings about Tds functions, released ecto_sql has $expected_warnings"
+fi
+[ "$compiled" -eq 0 ] && [ "$errors" -eq 0 ]
+report "adapter compiles without tds" $? "$detail"
+
+[ ! -e "$ebin/Elixir.Ecto.Adapters.Tds.Connection.beam" ] && [ ! -e "$ebin/Elixir.Tds.Ecto.UUID.beam" ]
+report "guarded modules are skipped without tds" $? "wrote ${produced:-nothing}"
+
+[ "$warnings" -le "$expected_warnings" ]
+report "no new warnings" $? "$warnings warnings, released ecto_sql has $expected_warnings"
+if [ "$warnings" -gt "$expected_warnings" ]; then
+  echo "A new warning appeared; the adapter should only warn about Tds.json_library/0 and Tds.start_link/1." >&2
+fi
+
+if [ "$status" -ne 0 ]; then
+  echo >&2
+  tail -n 40 "$log" >&2
+  echo "Full output is in $log." >&2
+fi
+
+exit "$status"

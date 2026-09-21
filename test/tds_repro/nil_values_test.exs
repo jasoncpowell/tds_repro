@@ -52,6 +52,13 @@ defmodule TdsRepro.NilValuesTest do
         assert Repo.get!(AllTypes, row.id) |> Map.fetch!(@field) == nil
       end
 
+      # Repo.insert/2 drops a nil change on an already-nil field, so the
+      # struct starts with every field set and the change clears one.
+      test "Repo.insert/2 inserts nil over a set field", %{values: values} do
+        assert {:ok, _} =
+                 AllTypes |> struct(values) |> change(%{@field => nil}) |> Repo.insert()
+      end
+
       test "Repo.insert_all/3 inserts nil" do
         assert {1, _} = Repo.insert_all(AllTypes, [%{@field => nil}])
       end

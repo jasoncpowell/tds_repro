@@ -36,6 +36,22 @@ defmodule TdsRepro.KnownLimitationsTest do
     end
   end
 
+  # The fix leaves custom types alone because Ecto never calls their dump/1 for
+  # nil: a NULL typed from the primitive would be wrong for a type that stores
+  # its values as something else, as TdsRepro.IntDate does.
+  describe "a NULL declared as date is refused by an int column" do
+    test "raw SQL with a date-typed nil parameter", %{row: row} do
+      params = [
+        %Tds.Parameter{name: "@1", value: nil, type: :date},
+        %Tds.Parameter{name: "@2", value: row.id, type: :integer}
+      ]
+
+      assert_refused(206, fn ->
+        Repo.query("UPDATE all_types SET int_date_int = @1 WHERE id = @2", params)
+      end)
+    end
+  end
+
   describe "values with no Ecto type, so the adapter has nothing to go on" do
     test "insert_all into a table name instead of a schema" do
       assert_refused(257, fn -> Repo.insert_all("all_types", [%{date_date: nil}]) end)

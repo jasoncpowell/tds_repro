@@ -2,7 +2,7 @@
 # Checks the patches in upstream/ecto_sql/ against ecto_sql itself:
 #
 #   1. they apply cleanly to ecto_sql master (or to the checkout you give)
-#   2. with the fix, the new unit test and integration test pass
+#   2. with the fix, the new unit tests and integration test pass
 #   3. without the fix, the same tests fail, so they really cover the bug
 #
 #   bin/verify-upstream               clone elixir-ecto/ecto_sql master
@@ -19,7 +19,7 @@ source bin/lib/summary.sh
 root=$PWD
 work=$root/tmp/verify-upstream
 source=${1:-https://github.com/elixir-ecto/ecto_sql.git}
-unit_test=test/ecto/type_test.exs
+unit_tests=(test/ecto/type_test.exs test/ecto/adapters/tds_test.exs)
 integration_test=integration_test/tds/nil_parameters_test.exs
 status=0
 
@@ -60,18 +60,21 @@ check() {
 
 echo
 echo "With the fix"
-check "unit test passes" pass with-fix-unit mix test "$unit_test"
+check "unit tests pass" pass with-fix-unit mix test "${unit_tests[@]}"
 check "integration test passes" pass with-fix-integration env ECTO_ADAPTER=tds mix test "$integration_test"
 
+# The fix spans the adapter (the dumpers) and the connection (the parameter
+# types); restore both from before the fix commit.
+fix_files=(lib/ecto/adapters/tds.ex lib/ecto/adapters/tds/connection.ex)
 fix_commit=$(git log -1 --format=%h -- lib/ecto/adapters/tds.ex)
-git checkout --quiet "$fix_commit^" -- lib/ecto/adapters/tds.ex
+git checkout --quiet "$fix_commit^" -- "${fix_files[@]}"
 
 echo
-echo "Without the fix (lib/ecto/adapters/tds.ex from before the fix commit)"
-check "unit test fails" fail without-fix-unit mix test "$unit_test"
+echo "Without the fix (lib/ecto/adapters/tds.ex and tds/connection.ex from before the fix commit)"
+check "unit tests fail" fail without-fix-unit mix test "${unit_tests[@]}"
 check "integration test fails" fail without-fix-integration env ECTO_ADAPTER=tds mix test "$integration_test"
 
-git checkout --quiet HEAD -- lib/ecto/adapters/tds.ex
+git checkout --quiet HEAD -- "${fix_files[@]}"
 
 if [ "$status" -ne 0 ]; then
   echo "Full output is in $work/." >&2
