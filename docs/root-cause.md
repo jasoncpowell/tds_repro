@@ -150,16 +150,19 @@ its own example appends a function that re-encodes values for the database.
 
 ## The fix
 
-The fix has two halves, both in the vendored ecto_sql (`git log -p --
-vendor/ecto_sql` shows the two commits after the vendoring one: `4d570f4`, the
-first version, and its follow-up):
+The fix has three parts, all in the vendored ecto_sql (`git log -p --
+vendor/ecto_sql` shows the commits after the vendoring one, starting with
+`4d570f4`, the first version):
 
 1. **The adapter tags the nil.** [`Ecto.Adapters.Tds.dumpers/2`](../vendor/ecto_sql/lib/ecto/adapters/tds.ex)
    appends a dumper for the eight affected Ecto types. It leaves non-nil
    values alone and turns a nil into a tuple of the nil and its Ecto type,
-   such as `{nil, :date}`. This is the convention `Tds.Ecto.VarChar` already
+   such as `{nil, :date}`. This is the shape `Tds.Ecto.VarChar` already
    uses when it dumps a string as `{value, :varchar}`
-   ([types.ex#L287-L289](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L287-L289)).
+   ([types.ex#L287-L289](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L287-L289)),
+   with one difference that matters: `Tds.Ecto.VarChar` is an `Ecto.Type`, so
+   Ecto short-circuits nil before its `dump/1` runs and it can never tag a
+   nil. This tag can, which is what part 3 is for.
    The clause is `dumpers(type, type) when type in @tagged_nil_types`: it
    matches only when the Ecto type is its own primitive, so built-in types
    are tagged and custom types are not (see below).
@@ -171,6 +174,24 @@ first version, and its follow-up):
    maps the tag to a TDS type. The tagged nil then takes the same path as
    every other parameter. The driver keeps an explicit type and only falls
    back to `:binary` when there is none.
+3. **The filter clauses keep comparing with `IS NULL`.** A dumped value is not
+   only parameter data. `Repo.update/2` and `Repo.delete/2` dump
+   `changeset.filters` through the same dumpers
+   ([schema.ex#L602](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo/schema.ex#L602),
+   [#L767](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo/schema.ex#L767))
+   and hand the result to
+   [`update/5` and `delete/4`](../vendor/ecto_sql/lib/ecto/adapters/tds/connection.ex),
+   which render a nil filter as `IS NULL` by matching `{field, nil}`
+   ([connection.ex#L289-L299](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L289-L299),
+   [#L313-L323](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L313-L323)).
+   Left alone, a tagged nil would fall through to `[col] = @N` bound to a NULL,
+   which is never true, and the row would not match: `Ecto.StaleEntryError`
+   instead of an update. Both functions now match the tagged form too. This is
+   the only other place ecto_sql reads a dumped value; `insert_each/2`'s
+   `nil -> DEFAULT` clause cannot see one, because
+   [`unzip_inserts/2`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/sql.ex#L996-L1014)
+   replaces each present value with its field name and emits a bare `nil` only
+   for keys the row does not have.
 
 | Ecto field type | NULL is declared as |
 |---|---|

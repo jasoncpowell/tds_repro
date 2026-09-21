@@ -5,7 +5,9 @@ supports. Checked on 2026-09-15, except the rows added for the restructured fix
 (the optional tds dependency, the `Code.ensure_loaded?(Tds)` guards,
 `prepare_params/1`, the `{_, :varchar}` clause, `Tds.Ecto.VarChar`, the driver's
 float encoding, `Ecto.Type.dump/3`, the `Ecto.Type` docs and Elixir's struct
-docs), which were checked on 2026-09-18.
+docs), which were checked on 2026-09-18, and the rows for the filter clauses
+(`update/5`, `delete/4`, `dump_fields!` and `unzip_inserts/2`) and the master
+commit, which were checked on 2026-09-21.
 
 ## Upstream reports and discussion
 
@@ -49,18 +51,21 @@ docs), which were checked on 2026-09-18.
 | ecto_sql [`types.ex#L287-L289`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L287-L289) | `Tds.Ecto.VarChar.dump/1` returns `{value, :varchar}`, the tagging convention the fix reuses for nil. |
 | ecto_sql [`connection.ex#L1`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L1), [`types.ex#L1`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L1) | The connection and the `Tds.Ecto.*` types compile only when `Tds` is loaded; `lib/ecto/adapters/tds.ex` has no such guard. |
 | ecto_sql [`mix.exs#L111`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/mix.exs#L111) (v3.14.0) | tds is an optional dependency, so the adapter must compile without it and can't build a `%Tds.Parameter{}`. |
+| ecto_sql [`connection.ex#L289-L299`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L289-L299), [`#L313-L323`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L313-L323) | `update/5` and `delete/4` render a nil filter as `IS NULL` by matching `{field, nil}`; the fix adds the same clause for the tagged nil. |
+| ecto_sql [`sql.ex#L996-L1014`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/sql.ex#L996-L1014) | `unzip_inserts/2` replaces each present value with its field name, so `insert_each/2`'s `nil -> DEFAULT` clause never sees a dumped value. |
 | ecto_sql [`connection.ex#L1825-L1842`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L1825-L1842) | Column types migrations create for date, time and float fields. |
 | ecto [`type.ex#L1041-L1049`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L1041-L1049) (v3.14.2) | `adapter_dump/3` runs the adapter's dumpers, including for nil. |
 | ecto [`type.ex#L542-L544`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L542-L544) | `Ecto.Type.dump/3` returns `{:ok, nil}` before calling a custom type's `dump/1`; why the fix leaves custom types alone. |
 | ecto [`type.ex#L538-L540`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L538-L540) | A parameterized type's `dump/3` runs before that nil short-circuit, so `Ecto.ParameterizedType` handles its own nil. |
 | ecto [`repo/schema.ex#L1365-L1366`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo/schema.ex#L1365-L1366), [`query/planner.ex#L2638`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/query/planner.ex#L2638) | Changes and query parameters are dumped through the adapter. |
+| ecto [`repo/schema.ex#L602`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo/schema.ex#L602), [`#L767`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo/schema.ex#L767) | `Repo.update/2` and `Repo.delete/2` dump `changeset.filters` through the adapter too, then pass them to `update/5` and `delete/4`. |
 | ecto [`changeset/relation.ex#L647-L649`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/changeset/relation.ex#L647-L649) | Inserts only include non-nil struct fields. |
 | [elixir-ecto/ecto#4214](https://github.com/elixir-ecto/ecto/pull/4214) (Ecto 3.11.0) | Adapters receive nil in dumpers and loaders; required for the fix. |
 | [elixir-ecto/ecto_sql#528](https://github.com/elixir-ecto/ecto_sql/pull/528), [`22be184`](https://github.com/elixir-ecto/ecto_sql/commit/22be18491f) | Tds loaders adjusted for ecto#4214. |
 | [elixir-ecto/ecto_sql#579](https://github.com/elixir-ecto/ecto_sql/pull/579) (ecto_sql 3.12.0) | `%Tds.Parameter{}` accepted in `Repo.query/3`. |
 | [elixir-ecto/ecto_sql#184](https://github.com/elixir-ecto/ecto_sql/pull/184) (2020-03-10) | Tds adapter merged into ecto_sql. |
 | ecto_sql [`Earthfile`](https://github.com/elixir-ecto/ecto_sql/blob/2385763/Earthfile) and [CI workflow](https://github.com/elixir-ecto/ecto_sql/blob/2385763/.github/workflows/ci.yml) | Upstream CI runs Tds integration tests against SQL Server 2019 and 2022. |
-| ecto_sql master [`2385763`](https://github.com/elixir-ecto/ecto_sql/commit/2385763) (2026-09-06) | Still sends nil without a type; the bug is unresolved on master. |
+| ecto_sql master [`86234e7`](https://github.com/elixir-ecto/ecto_sql/commit/86234e7) (2026-09-19) | Still sends nil without a type; the bug is unresolved on master. The patches in `upstream/ecto_sql/` are generated against this commit. |
 
 ## Ecto, ecto_sql and tds documentation
 

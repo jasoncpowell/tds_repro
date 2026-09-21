@@ -19,13 +19,13 @@ both still open.
 | | |
 |---|---|
 | **Bug** | Reproduces on the latest releases (ecto_sql 3.14.0, ecto 3.14.2, tds 2.3.8) and on ecto_sql master, against SQL Server 2017, 2019 and 2022. |
-| **Fix** | Two small changes to ecto_sql's Tds adapter: `Ecto.Adapters.Tds.dumpers/2` tags a nil of the affected Ecto types with its type, and `Ecto.Adapters.Tds.Connection.prepare_params/1` turns the tag into a typed `%Tds.Parameter{}`. Applied to the copy of ecto_sql in [`vendor/ecto_sql`](vendor/ecto_sql) (`git log -p -- vendor/ecto_sql` shows it). All 121 tests in this repo pass with it. |
+| **Fix** | Three small changes in two files of ecto_sql's Tds adapter: `Ecto.Adapters.Tds.dumpers/2` tags a nil of the affected Ecto types with its type, `Ecto.Adapters.Tds.Connection.prepare_params/1` turns the tag into a typed `%Tds.Parameter{}`, and `update/5` and `delete/4` keep comparing such a nil filter with `IS NULL`. Applied to the copy of ecto_sql in [`vendor/ecto_sql`](vendor/ecto_sql) (`git log -p -- vendor/ecto_sql` shows it). All 162 tests in this repo pass with it. |
 | **Upstream PR** | Ready, not submitted. The fix and its tests are in [`upstream/ecto_sql/`](upstream/ecto_sql) and pass on ecto_sql master: ecto_sql's full unit suite, and its full Tds integration suite against SQL Server 2022, with no regressions (the first version of the fix also passed on 2017 and 2019). See the [PR draft](docs/pr-draft.md) and [how to submit it](docs/creating-the-pr.md). |
 
 ## Who is affected
 
 Apps using Ecto with SQL Server that set one of these fields to nil through
-`Repo.update/2`, `Repo.insert_all/3` or `Repo.update_all/3`:
+`Repo.insert/2`, `Repo.update/2`, `Repo.insert_all/3` or `Repo.update_all/3`:
 
 - `:date`, `:time`, `:time_usec`, `:naive_datetime_usec`, `:utc_datetime_usec`
   and `:float` fields, with the columns Ecto's migrations create for them
