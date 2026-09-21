@@ -81,4 +81,41 @@ defmodule TdsRepro.DumpersTest do
                Connection.prepare_params([nil])
     end
   end
+
+  describe "a nil filter is still compared with IS NULL" do
+    # Repo.update/2 and Repo.delete/2 dump changeset.filters through the
+    # adapter and hand the dumped values to Connection.update/5 and
+    # Connection.delete/4, which render a nil filter as IS NULL. A tagged nil
+    # has to reach the same clause: comparing a column with a NULL parameter is
+    # never true, so the row would not match and Ecto would raise
+    # Ecto.StaleEntryError. These assert the SQL, not the tag, so they hold on
+    # released ecto_sql and with the fix alike.
+    defp dump!(type, value) do
+      {:ok, dumped} = Ecto.Type.adapter_dump(@adapter, type, value)
+      dumped
+    end
+
+    for {ecto_type, _tds_type} <- @typed_nils do
+      test "UPDATE filters on a nil #{inspect(ecto_type)} with IS NULL" do
+        filters = [{:id, 1}, {:cleared, dump!(unquote(ecto_type), nil)}]
+
+        assert IO.iodata_to_binary(Connection.update(nil, "t", [:x], filters, [])) ==
+                 "UPDATE [t] SET [x] = @1 WHERE [id] = @2 AND [cleared] IS NULL"
+      end
+
+      test "DELETE filters on a nil #{inspect(ecto_type)} with IS NULL" do
+        filters = [{:id, 1}, {:cleared, dump!(unquote(ecto_type), nil)}]
+
+        assert IO.iodata_to_binary(Connection.delete(nil, "t", filters, [])) ==
+                 "DELETE FROM [t] WHERE [id] = @1 AND [cleared] IS NULL"
+      end
+    end
+
+    test "a non-nil filter is still compared with a parameter" do
+      filters = [{:id, 1}, {:due_on, dump!(:date, ~D[2026-01-01])}]
+
+      assert IO.iodata_to_binary(Connection.update(nil, "t", [:x], filters, [])) ==
+               "UPDATE [t] SET [x] = @1 WHERE [id] = @2 AND [due_on] = @3"
+    end
+  end
 end
