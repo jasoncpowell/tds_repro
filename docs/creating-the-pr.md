@@ -61,6 +61,13 @@ then regenerate the patches from that checkout and commit them to this repo:
 git -C tmp/verify-upstream/ecto_sql format-patch origin/master..HEAD -o "$PWD/upstream/ecto_sql"
 ```
 
+The outgoing commits carry `Co-authored-by: Claude <noreply@anthropic.com>`:
+unversioned, because a product version dates the commit and means nothing to a
+reviewer, and lowercase, because that is the spelling every one of the 15
+co-author trailers in ecto_sql's history uses. Keep that form when regenerating
+the patches; `git format-patch` reproduces whatever the commits say, so check
+the trailers after any rebase or amend.
+
 ## 2. Fork and clone ecto_sql (confirm)
 
 ```sh
