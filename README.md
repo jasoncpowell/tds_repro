@@ -71,11 +71,11 @@ each result:
 
 ```
 Released ecto_sql 3.14.0 (ECTO_SQL=upstream)
-  ok    the bug reproduces: every :bug test fails (42 of 42 failed)
-  ok    every other test passes (0 of 79 failed)
+  ok    the bug reproduces: every :bug test fails (50 of 50 failed)
+  ok    every other test passes (0 of 112 failed)
 
 Vendored ecto_sql with the fix
-  ok    every test passes (0 of 121 failed)
+  ok    every test passes (0 of 162 failed)
 ```
 
 If port 1433 is taken, pick another and pass it to every command, for example
@@ -131,9 +131,9 @@ With the fix, every line reads `works` and it ends with `0 of 10 writes hit the 
 ### Tests
 
 ```sh
-mix test                                   # with the fix: all 121 pass
-ECTO_SQL=upstream mix test --only bug      # released: all 42 fail
-ECTO_SQL=upstream mix test --exclude bug   # released: the other 79 pass
+mix test                                   # with the fix: all 162 pass
+ECTO_SQL=upstream mix test --only bug      # released: all 50 fail
+ECTO_SQL=upstream mix test --exclude bug   # released: the other 112 pass
 ```
 
 Tests tagged `:bug` fail on released ecto_sql and pass with the fix. Everything
@@ -141,8 +141,8 @@ else passes on both.
 
 | File | Covers |
 |---|---|
-| [`dumpers_test.exs`](test/tds_repro/dumpers_test.exs) | How the adapter dumps nil and how the connection prepares the parameter, without a database. |
-| [`nil_values_test.exs`](test/tds_repro/nil_values_test.exs) | Writing nil through `Repo.update`, `Repo.insert_all` and `Repo.update_all` for 24 of the 26 field type and column type combinations in [`TdsRepro.AllTypes`](lib/tds_repro/all_types.ex) (25 combinations of built-in types, plus the custom [`TdsRepro.IntDate`](lib/tds_repro/int_date.ex) type on an `int` column; the two `text`/`ntext` combinations are in `known_limitations_test.exs`), plus checks that nothing else changed. |
+| [`dumpers_test.exs`](test/tds_repro/dumpers_test.exs) | How the adapter dumps nil, how the connection prepares the parameter, and how a nil filter is still compared with `IS NULL`, all without a database. |
+| [`nil_values_test.exs`](test/tds_repro/nil_values_test.exs) | Writing nil through `Repo.insert`, `Repo.update`, `Repo.insert_all` and `Repo.update_all` for 24 of the 26 field type and column type combinations in [`TdsRepro.AllTypes`](lib/tds_repro/all_types.ex) (25 combinations of built-in types, plus the custom [`TdsRepro.IntDate`](lib/tds_repro/int_date.ex) type on an `int` column; the two `text`/`ntext` combinations are in `known_limitations_test.exs`), plus checks that nothing else changed. |
 | [`known_limitations_test.exs`](test/tds_repro/known_limitations_test.exs) | What the fix doesn't cover, asserted so a change in behaviour is noticed, and why custom types are left alone. |
 | [`workarounds_test.exs`](test/tds_repro/workarounds_test.exs) | What works on released ecto_sql today. |
 
@@ -155,11 +155,19 @@ Tests use their own `tds_repro_test` database, created and migrated by
 git log -p -- vendor/ecto_sql
 ```
 
-Two commits after the vendoring one: `4d570f4`, the first version, which built
-a `%Tds.Parameter{}` in the adapter's dumpers, and the one that follows it,
-which moves the struct into the connection so the adapter compiles without
-tds, leaves custom types alone and documents how the driver sends a nil float.
-[docs/root-cause.md](docs/root-cause.md#the-fix) explains both.
+Three commits after the vendoring one:
+
+- `4d570f4`, the first version, which built a `%Tds.Parameter{}` in the
+  adapter's dumpers.
+- `38d4687`, which moves the struct into the connection so the adapter compiles
+  without tds, leaves custom types alone, and documents how the driver sends a
+  nil float.
+- `eb3a864`, which keeps `update/5` and `delete/4` comparing a nil filter with
+  `IS NULL`. A tagged nil no longer matches their `{field, nil}` clause, so
+  without this a guarded `Repo.update/2` compared the column with a NULL
+  parameter, matched no rows and raised `Ecto.StaleEntryError`.
+
+[docs/root-cause.md](docs/root-cause.md#the-fix) explains all three.
 
 ## Verifying the upstream patches
 
@@ -172,16 +180,16 @@ and runs the new upstream tests with the fix and without it:
 
 ```
 Cloning https://github.com/elixir-ecto/ecto_sql.git
-  at 2385763 2026-09-06 Fix NOT precedence for in and is_nil (#753)
+  at 86234e7 2026-09-19 Fix precedence issue in queries, closes #754
   ok    patches apply (2 patches)
 
 With the fix
-  ok    unit tests pass (0 of 138 failed)
-  ok    integration test passes (0 of 31 failed)
+  ok    unit tests pass (0 of 139 failed)
+  ok    integration test passes (0 of 40 failed)
 
 Without the fix (lib/ecto/adapters/tds.ex and tds/connection.ex from before the fix commit)
-  ok    unit tests fail (3 of 138 failed)
-  ok    integration test fails (22 of 31 failed)
+  ok    unit tests fail (4 of 139 failed)
+  ok    integration test fails (29 of 40 failed)
 ```
 
 The `at` line shows whichever ecto_sql master commit was cloned. The script
