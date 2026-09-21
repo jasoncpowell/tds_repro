@@ -1,4 +1,4 @@
-From 34004fe6ea296720456bd0832422b493f9de65ff Mon Sep 17 00:00:00 2001
+From df384e7f26fc7f398c1848b9b8df96321a06bc70 Mon Sep 17 00:00:00 2001
 From: Jason Powell <jasoncpowell@protonmail.com>
 Date: Fri, 18 Sep 2026 13:20:19 -0400
 Subject: [PATCH 2/2] Test nil date, time and float parameters in Tds
@@ -9,28 +9,30 @@ values, arrays and a custom type with a :date primitive alone.
 
 test/ecto/adapters/tds_test.exs: prepare_params/1 turns the tag into a
 %Tds.Parameter{} typed date, time, datetime2, datetimeoffset or float,
-numbers it in sequence with the other params, and still passes a bare
-nil through untyped.
+numbers it in sequence with the other params and still passes a bare
+nil through untyped; update/5 and delete/4 keep comparing a tagged nil
+filter with IS NULL.
 
 integration_test/tds/nil_parameters_test.exs: writes nil through
-Repo.update, Repo.insert_all, Repo.update_all and a type/2 cast for
-each affected column type, and through a custom type with a :date
-primitive on an integer column, whose NULL must stay untyped.
+Repo.insert, Repo.update, Repo.insert_all, Repo.update_all and a
+type/2 cast for each affected column type, and through a custom type
+with a :date primitive on an integer column, whose NULL must stay
+untyped.
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Co-authored-by: Claude <noreply@anthropic.com>
 ---
- integration_test/tds/nil_parameters_test.exs | 146 +++++++++++++++++++
- test/ecto/adapters/tds_test.exs              |  31 ++++
- test/ecto/type_test.exs                      |  50 +++++++
- 3 files changed, 227 insertions(+)
+ integration_test/tds/nil_parameters_test.exs | 154 +++++++++++++++++++
+ test/ecto/adapters/tds_test.exs              |  43 ++++++
+ test/ecto/type_test.exs                      |  50 ++++++
+ 3 files changed, 247 insertions(+)
  create mode 100644 integration_test/tds/nil_parameters_test.exs
 
 diff --git a/integration_test/tds/nil_parameters_test.exs b/integration_test/tds/nil_parameters_test.exs
 new file mode 100644
-index 0000000..6761222
+index 0000000..900b924
 --- /dev/null
 +++ b/integration_test/tds/nil_parameters_test.exs
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,154 @@
 +defmodule Ecto.Integration.NilParametersTest do
 +  use ExUnit.Case, async: true
 +
@@ -126,6 +128,14 @@ index 0000000..6761222
 +      assert PoolRepo.get!(NilParameters, row.id) |> Map.fetch!(unquote(field)) == nil
 +    end
 +
++    # Ecto drops a nil change on an already-nil field, so the struct starts
++    # with every field set and the changeset clears one.
++    test "inserts nil #{field} over a set field" do
++      changeset = Ecto.Changeset.change(struct(NilParameters, @values), [{unquote(field), nil}])
++
++      assert {:ok, _} = PoolRepo.insert(changeset)
++    end
++
 +    test "inserts nil #{field} with insert_all" do
 +      assert {1, _} = PoolRepo.insert_all(NilParameters, [%{unquote(field) => nil}])
 +    end
@@ -178,10 +188,29 @@ index 0000000..6761222
 +  end
 +end
 diff --git a/test/ecto/adapters/tds_test.exs b/test/ecto/adapters/tds_test.exs
-index 2e94de1..e592a45 100644
+index 2e94de1..8735628 100644
 --- a/test/ecto/adapters/tds_test.exs
 +++ b/test/ecto/adapters/tds_test.exs
-@@ -2145,6 +2145,37 @@ defmodule Ecto.Adapters.TdsTest do
+@@ -1341,6 +1341,18 @@ defmodule Ecto.Adapters.TdsTest do
+     assert query == ~s{DELETE FROM [prefix].[schema] WHERE [x] = @1 AND [y] = @2}
+   end
+ 
++  # Ecto.Adapters.Tds.dumpers/2 tags a nil with its Ecto type, and Repo.update/2
++  # and Repo.delete/2 pass dumped changeset filters to update/5 and delete/4. A
++  # tagged nil has to compare with IS NULL: comparing with a NULL parameter is
++  # never true, so the row would never match.
++  test "update and delete filter a tagged nil with IS NULL" do
++    query = update(nil, "schema", [:x], [{:id, 1}, {:y, {nil, :date}}], [])
++    assert query == ~s{UPDATE [schema] SET [x] = @1 WHERE [id] = @2 AND [y] IS NULL}
++
++    query = delete(nil, "schema", [{:id, 1}, {:y, {nil, :utc_datetime}}], [])
++    assert query == ~s{DELETE FROM [schema] WHERE [id] = @1 AND [y] IS NULL}
++  end
++
+   ## Values List
+ 
+   test "values list: all" do
+@@ -2145,6 +2157,37 @@ defmodule Ecto.Adapters.TdsTest do
          SQL.prepare_params([%Tds.Parameter{name: "Param"}])
        end
      end

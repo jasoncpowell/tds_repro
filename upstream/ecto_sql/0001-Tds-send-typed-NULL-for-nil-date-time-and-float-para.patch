@@ -1,4 +1,4 @@
-From e7c3efea8613c5c73aca191e6e123ec43b339a3a Mon Sep 17 00:00:00 2001
+From 99646bd9f06dcc5ee9e936672b1205a87bb9bc64 Mon Sep 17 00:00:00 2001
 From: Jason Powell <jasoncpowell@protonmail.com>
 Date: Fri, 18 Sep 2026 13:13:29 -0400
 Subject: [PATCH 1/2] Tds: send typed NULL for nil date, time and float params
@@ -9,12 +9,19 @@ convert varbinary implicitly to date, time, datetime2, datetimeoffset,
 float or real, so clearing such a field failed with error 257 or 206.
 
 Ecto.Adapters.Tds.dumpers/2 now tags a nil of these Ecto types with the
-type, as Tds.Ecto.VarChar does with {value, :varchar}, and
-Ecto.Adapters.Tds.Connection.prepare_params/1 turns the tag into a
-%Tds.Parameter{} declared as the type it already uses for a non-nil
-date or time value of the same field (date, time, datetime2 or
+type and Ecto.Adapters.Tds.Connection.prepare_params/1 turns the tag
+into a %Tds.Parameter{} declared as the type it already uses for a
+non-nil date or time value of the same field (date, time, datetime2 or
 datetimeoffset), or as float. The driver declares a nil float as
 decimal(1,0), which SQL Server converts implicitly to float and real.
+
+The tag has the {value, :varchar} shape Tds.Ecto.VarChar dumps, but
+unlike it this one can carry nil, and nil is the one dumped value the
+SQL generation inspects: update/5 and delete/4 render a nil filter as
+IS NULL. Both now match the tagged form too, so a filter on a nil field
+still compares with IS NULL and not with a NULL parameter, which would
+never be true. That is the only place a dumped value is read outside
+prepare_params/1.
 
 The adapter module compiles without the optional tds dependency, so it
 cannot build the %Tds.Parameter{} itself; only the connection, which is
@@ -31,11 +38,11 @@ Logged parameters are the cast values and still show nil.
 
 Refs elixir-ecto/tds#124, elixir-ecto/tds#168
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Co-authored-by: Claude <noreply@anthropic.com>
 ---
- lib/ecto/adapters/tds.ex            | 34 +++++++++++++++++++++++++++++
- lib/ecto/adapters/tds/connection.ex | 23 +++++++++++++++++++
- 2 files changed, 57 insertions(+)
+ lib/ecto/adapters/tds.ex            | 34 ++++++++++++++++++++++++++++
+ lib/ecto/adapters/tds/connection.ex | 35 +++++++++++++++++++++++++++++
+ 2 files changed, 69 insertions(+)
 
 diff --git a/lib/ecto/adapters/tds.ex b/lib/ecto/adapters/tds.ex
 index 711eae9..c13e9e3 100644
@@ -88,7 +95,7 @@ index 711eae9..c13e9e3 100644
    defp bool_decode(<<1>>), do: {:ok, true}
    defp bool_decode(0), do: {:ok, false}
 diff --git a/lib/ecto/adapters/tds/connection.ex b/lib/ecto/adapters/tds/connection.ex
-index 170b832..1f2788b 100644
+index 170b832..cdd2068 100644
 --- a/lib/ecto/adapters/tds/connection.ex
 +++ b/lib/ecto/adapters/tds/connection.ex
 @@ -135,6 +135,25 @@ if Code.ensure_loaded?(Tds) do
@@ -127,6 +134,32 @@ index 170b832..1f2788b 100644
 +
      defp prepare_raw_param({_, :varchar} = value), do: value
      defp prepare_raw_param(value), do: {value, nil}
+ 
+@@ -291,6 +314,12 @@ if Code.ensure_loaded?(Tds) do
+           {field, nil}, acc ->
+             {[quote_name(field), " IS NULL"], acc + 1}
+ 
++          # Ecto.Adapters.Tds.dumpers/2 tags a nil with its Ecto type. A filter
++          # still has to compare with IS NULL: comparing with a NULL parameter
++          # is never true, and the row would never match.
++          {field, {nil, _ecto_type}}, acc ->
++            {[quote_name(field), " IS NULL"], acc + 1}
++
+           {field, _value}, acc ->
+             {[quote_name(field), " = @", Integer.to_string(acc)], acc + 1}
+ 
+@@ -315,6 +344,12 @@ if Code.ensure_loaded?(Tds) do
+           {field, nil}, acc ->
+             {[quote_name(field), " IS NULL"], acc + 1}
+ 
++          # Ecto.Adapters.Tds.dumpers/2 tags a nil with its Ecto type. A filter
++          # still has to compare with IS NULL: comparing with a NULL parameter
++          # is never true, and the row would never match.
++          {field, {nil, _ecto_type}}, acc ->
++            {[quote_name(field), " IS NULL"], acc + 1}
++
+           {field, _value}, acc ->
+             {[quote_name(field), " = @", Integer.to_string(acc)], acc + 1}
  
 -- 
 2.54.0 (Apple Git-157)
