@@ -21,6 +21,19 @@ defmodule TdsRepro.DumpersTest do
     float: :float
   ]
 
+  # A non-nil value of each type in @typed_nils. The _usec types need
+  # microsecond precision, the others none, or Ecto refuses to dump them.
+  @values [
+    date: ~D[2026-01-01],
+    time: ~T[09:30:00],
+    time_usec: ~T[09:30:00.123456],
+    naive_datetime: ~N[2026-01-01 09:30:00],
+    naive_datetime_usec: ~N[2026-01-01 09:30:00.123456],
+    utc_datetime: ~U[2026-01-01 09:30:00Z],
+    utc_datetime_usec: ~U[2026-01-01 09:30:00.123456Z],
+    float: 1.5
+  ]
+
   describe "nil for types SQL Server won't accept as varbinary" do
     for {ecto_type, tds_type} <- @typed_nils do
       @tag :bug
@@ -40,6 +53,26 @@ defmodule TdsRepro.DumpersTest do
     test "a tagged nil is numbered like any other parameter" do
       assert [%{name: "@1"}, %Tds.Parameter{name: "@2", value: nil, type: :date}, %{name: "@3"}] =
                Connection.prepare_params([1, {nil, :date}, "a"])
+    end
+  end
+
+  describe "a nil gets the parameter type of a value of its field" do
+    # Three places decide these types: the adapter's dumpers for a nil, the
+    # connection's prepare_param/1 for a date or time value, and the driver's
+    # Tds.Parameter.fix_data_type/1 for a float, which the connection leaves
+    # untyped. Comparing what reaches the driver keeps them in step.
+    defp parameter_type(type, value) do
+      {:ok, dumped} = Ecto.Type.adapter_dump(@adapter, type, value)
+      [param] = Connection.prepare_params([dumped])
+      Tds.Parameter.fix_data_type(param).type
+    end
+
+    for {type, _value} <- @values do
+      @tag :bug
+      test "a #{inspect(type)} nil gets the parameter type of a value" do
+        type = unquote(type)
+        assert parameter_type(type, nil) == parameter_type(type, Keyword.fetch!(@values, type))
+      end
     end
   end
 
