@@ -67,8 +67,14 @@ check "integration test passes" pass with-fix-integration env ECTO_ADAPTER=tds m
 # ecto_sql's own check: mix test.as_a_dep compiles ecto_sql as the dependency
 # of a new project, without its optional drivers. Unlike bin/compile-without-tds
 # it also catches a compile-time reference from the adapter to a module that
-# is only compiled with tds.
-mix test.as_a_dep >"$work/with-fix-as-a-dep.log" 2>&1
+# is only compiled with tds. TDS_PATH would make tds a required dependency of
+# ecto_sql, so it is unset, and the build must show that tds really was absent:
+# no tds, the adapter compiled, the guarded connection skipped.
+as_a_dep_build=tmp/as_a_dep/_build/*/lib
+env -u TDS_PATH mix test.as_a_dep >"$work/with-fix-as-a-dep.log" 2>&1 &&
+  ! compgen -G "$as_a_dep_build/tds" >/dev/null &&
+  compgen -G "$as_a_dep_build/ecto_sql/ebin/Elixir.Ecto.Adapters.Tds.beam" >/dev/null &&
+  ! compgen -G "$as_a_dep_build/ecto_sql/ebin/Elixir.Ecto.Adapters.Tds.Connection.beam" >/dev/null
 report "compiles as a dependency without tds" $? "mix test.as_a_dep"
 
 # The fix spans the adapter (the dumpers) and the connection (the parameter
