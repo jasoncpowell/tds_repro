@@ -152,12 +152,13 @@ defmodule Ecto.Adapters.Tds do
   def loaders(_, type), do: [type]
 
   # The TDS type a nil of these built-in types is sent as. An untyped nil is
-  # declared as varbinary, which their columns refuse, so tag_nil/2 pairs it
-  # with the type a non-nil value of the field gets, and the connection passes
-  # the pair on like {value, :varchar}. It holds only atoms, so this module
-  # still compiles without tds. Custom types aren't tagged: Ecto never calls
-  # their dump/1 for nil, so how they store values is unknown. :string is left
-  # alone on purpose (elixir-ecto/tds#162).
+  # declared as varbinary, which date, time, datetime2, datetimeoffset, float
+  # and real columns refuse, so tag_nil/2 pairs it with the type a non-nil
+  # value of the field gets, and the connection passes the pair on like
+  # {value, :varchar}. It holds only atoms, so this module still compiles
+  # without tds. Custom types aren't tagged: Ecto never calls their dump/1 for
+  # nil, so how they store values is unknown. :string is left alone on purpose
+  # (elixir-ecto/tds#162).
   @tagged_nil_types %{
     date: :date,
     time: :time,

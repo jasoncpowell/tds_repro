@@ -144,7 +144,8 @@ if Code.ensure_loaded?(Tds) do
     defp prepare_raw_param(value) when value == false, do: {0, :boolean}
     defp prepare_raw_param({_, :varchar} = value), do: value
 
-    # A nil that Ecto.Adapters.Tds.dumpers/2 paired with its TDS type
+    # A nil that Ecto.Adapters.Tds.dumpers/2 paired with its TDS type. The
+    # list is the set of values of @tagged_nil_types there.
     defp prepare_raw_param({nil, type} = value)
          when type in [:date, :time, :datetime2, :datetimeoffset, :float],
          do: value
