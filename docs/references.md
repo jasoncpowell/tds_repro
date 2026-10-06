@@ -8,8 +8,9 @@ float encoding, `Ecto.Type.dump/3`, the `Ecto.Type` docs and Elixir's struct
 docs), which were checked on 2026-09-18, and the rows for the filter clauses
 (`update/5`, `delete/4`, `dump_fields!` and `unzip_inserts/2`), which were
 checked on 2026-09-21, and the rows for the TDS-typed tag (the dumpers and
-telemetry docs, logging, the driver's declarations), `mix test.as_a_dep` and
-the master commit, which were checked on 2026-10-06.
+telemetry docs, logging, the driver's declarations), `mix test.as_a_dep`, the
+master commit, the `in ^list` and nil decimal limitations, tds's v3 type names
+and the issue timelines, which were checked on 2026-10-06.
 
 ## Upstream reports and discussion
 
@@ -31,6 +32,7 @@ the master commit, which were checked on 2026-10-06.
 | [elixir-ecto/tds#162](https://github.com/elixir-ecto/tds/pull/162) (closed) and branch [`wm-nil-as-type-string`](https://github.com/elixir-ecto/tds/tree/wm-nil-as-type-string) | Rejected `:string` fallback. |
 | [tds#162: rschenk](https://github.com/elixir-ecto/tds/pull/162#issuecomment-2155050557), [wojtekmach's test script](https://github.com/elixir-ecto/tds/pull/162#issuecomment-2157626223), [mjaric](https://github.com/elixir-ecto/tds/pull/162#issuecomment-2159217692), [closing comment](https://github.com/elixir-ecto/tds/pull/162#issuecomment-2160077979) | Which column types each fallback breaks; `:binary_id` priority. |
 | [elixir-ecto/tds#168](https://github.com/elixir-ecto/tds/issues/168) (2025-04-03, open) | `insert_all` with an explicit nil fails against `datetime2`. |
+| The timelines of [tds#124](https://github.com/elixir-ecto/tds/issues/124) and [tds#168](https://github.com/elixir-ecto/tds/issues/168) | A "referenced" event on 2026-09-15 from this repo's commit `4d570f4`, and no comments since. |
 | [Elixir Forum thread 40034](https://elixirforum.com/t/error-on-updating-a-time-field-to-null-using-ecto-with-tds-adapter/40034) (2021-05-27) | Same error for a `time` field. |
 | `wm-types` proof of concept in [ecto](https://github.com/elixir-ecto/ecto/compare/24f914a...wm-types) and [ecto_sql](https://github.com/elixir-ecto/ecto_sql/compare/2385763...wm-types) (2024-06-10) | The maintainers' Option 1 sketch. |
 | [elixir-ecto/tds#183](https://github.com/elixir-ecto/tds/pull/183) (draft) and branch [`next`](https://github.com/elixir-ecto/tds/tree/next) | Driver rewrite still falls back to `:binary` for untyped nils. |
@@ -48,8 +50,11 @@ the master commit, which were checked on 2026-10-06.
 | tds [`protocol.ex#L198`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/protocol.ex#L198), [`#L569`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/protocol.ex#L569) | Statements are prepared with `sp_prepare` by default. |
 | tds [`types.ex#L988-L1016`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L988-L1016) | A date or time value's precision goes into its declaration, as in `datetime2(6)`; a nil is declared with the default precision. |
 | tds [`types.ex#L1075-L1095`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L1075-L1095) | An unknown parameter type is declared as `varchar` or `nvarchar`, `(1)` for a nil; why the connection's pass-through clause lists the TDS types it admits. |
+| tds [`types.ex#L1108-L1109`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L1108-L1109) | A `:decimal` parameter with a nil value is declared as varbinary, so typing a nil decimal wouldn't help a `float` column. |
+| tds [`parameter.ex#L2`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L2) | `Tds.Parameter` is `@moduledoc false`: its type names are undocumented. |
+| tds `next` [`datetime.ex#L54-L56`](https://github.com/elixir-ecto/tds/blob/de6a27311d/lib/tds/type/datetime.ex#L54-L56), [`float.ex#L21`](https://github.com/elixir-ecto/tds/blob/de6a27311d/lib/tds/type/float.ex#L21), [`string.ex#L41`](https://github.com/elixir-ecto/tds/blob/de6a27311d/lib/tds/type/string.ex#L41) (`de6a27311d`, 2026-08-20) | The v3 redesign keeps the five type names the fix's tag uses, and drops `:varchar`. |
 | ecto_sql [`tds.ex#L155-L157`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds.ex#L155-L157) (v3.14.0) | The dumpers the fix changes. |
-| ecto_sql [`connection.ex#L102-L123`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L102-L123), [`#L146`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L146) | Parameter types come from values; typed parameters pass through; nil gets no type. |
+| ecto_sql [`connection.ex#L102-L117`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L102-L117), [`#L118-L125`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L118-L125), [`#L146`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L146) | Parameter types come from the value's struct; typed `%Tds.Parameter{}` params pass through; nil gets no type. |
 | ecto_sql [`connection.ex#L79-L95`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L79-L95) | `prepare_params/1` builds and numbers a `%Tds.Parameter{}` for every parameter; the fix's tagged nil takes this path. |
 | ecto_sql [`connection.ex#L145`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L145) | The existing `prepare_raw_param/1` clause, which passes the `{_, :varchar}` tag on unchanged; the fix's clause, right after it, passes `{nil, tds_type}` on the same way. |
 | ecto_sql [`types.ex#L216-L217`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L216-L217), [`#L287-L289`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L287-L289) | `Tds.Ecto.VarChar` wraps a string in a tuple "so TDS driver can understand" how to encode it: `dump/1` returns `{value, :varchar}`, a value paired with a driver type, the convention the fix reuses for nil. |
@@ -61,6 +66,7 @@ the master commit, which were checked on 2026-10-06.
 | ecto_sql [`sql.ex#L1291`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/sql.ex#L1291), [`#L532-L552`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/sql.ex#L532-L552) | Log lines show `:cast_params` when a call passes them; `explain/4` passes none, so its log line shows the dumped parameters. |
 | ecto_sql [`logging.exs#L74-L87`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/integration_test/sql/logging.exs#L74-L87) | On Tds, telemetry `:params` already hold `Tds.Ecto.UUID`'s bytes, while `:cast_params` hold the user's value. |
 | ecto [`type.ex#L1041-L1049`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L1041-L1049) (v3.14.2) | `adapter_dump/3` runs the adapter's dumpers, including for nil. |
+| ecto [`type.ex#L460`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L460), ecto_sql [`postgres.ex#L184`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/postgres.ex#L184) | `type/1` returns `{:in, type}` unchanged, so an adapter's dumpers see it as both types, and the Postgres adapter has a clause for it: a nil inside `in ^list` could be typed without changing Ecto. |
 | ecto [`type.ex#L542-L544`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L542-L544) | `Ecto.Type.dump/3` returns `{:ok, nil}` before calling a custom type's `dump/1`; why the fix leaves custom types alone. |
 | ecto [`type.ex#L538-L540`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L538-L540) | A parameterized type's `dump/3` runs before that nil short-circuit, so `Ecto.ParameterizedType` handles its own nil. |
 | ecto [`repo/schema.ex#L1365-L1366`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo/schema.ex#L1365-L1366), [`query/planner.ex#L2638`](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/query/planner.ex#L2638) | Changes and query parameters are dumped through the adapter. |
@@ -81,7 +87,7 @@ the master commit, which were checked on 2026-10-06.
 | Reference | Supports |
 |---|---|
 | [`Ecto.Adapter` `dumpers/2`](https://ecto.hexdocs.pm/Ecto.Adapter.html#c:dumpers/2) | What dumpers receive and return. |
-| [`Ecto.Type`](https://ecto.hexdocs.pm/Ecto.Type.html#module-example), [`type/0`](https://ecto.hexdocs.pm/Ecto.Type.html#c:type/0) | Custom types: "nil values are always bypassed and cannot be handled by custom types"; `type/0` gives the underlying primitive. |
+| [`Ecto.Type`](https://ecto.hexdocs.pm/Ecto.Type.html#module-example), [`type/0`](https://ecto.hexdocs.pm/Ecto.Type.html#c:type/0) | Custom types: "nil values are always bypassed and cannot be handled by custom types"; `type/0` returns the type the adapter sees, which "is not required to" be an Ecto primitive (`Tds.Ecto.VarChar` returns `:varchar`). |
 | Elixir [Structs](https://hexdocs.pm/elixir/structs.html) | Structs "provide compile-time checks": a `%Tds.Parameter{}` literal needs the module at compile time. |
 | [`Ecto.Repo` `insert/2`](https://ecto.hexdocs.pm/Ecto.Repo.html#c:insert/2) | Structs become changesets "with all non-nil fields". |
 | [`Ecto.Repo` `update_all/3`](https://ecto.hexdocs.pm/Ecto.Repo.html#c:update_all/3), [`insert_all/3`](https://ecto.hexdocs.pm/Ecto.Repo.html#c:insert_all/3) | Neither updates autogenerated fields such as timestamps. |
@@ -97,7 +103,7 @@ the master commit, which were checked on 2026-10-06.
 | [Data type conversion (Database Engine)](https://learn.microsoft.com/en-us/sql/t-sql/data-types/data-type-conversion-database-engine) | Implicit vs explicit conversion, the conversion chart, and conversion on insert into a column. |
 | [CAST and CONVERT](https://learn.microsoft.com/en-us/sql/t-sql/functions/cast-and-convert-transact-sql) | `text` and `image` don't support automatic conversion. |
 | [binary and varbinary](https://learn.microsoft.com/en-us/sql/t-sql/data-types/binary-and-varbinary-transact-sql) | Conversions involving binary types. |
-| [Database engine errors 0 to 999](https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-0-to-999) | Error texts for 206, 257 and 529. |
+| [Database engine errors 0 to 999](https://learn.microsoft.com/en-us/sql/relational-databases/errors-events/database-engine-events-and-errors-0-to-999) | Error texts for 206, 257, 402 and 529. |
 | [sp_prepare](https://learn.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-prepare-transact-sql), [sp_executesql](https://learn.microsoft.com/en-us/sql/relational-databases/system-stored-procedures/sp-executesql-transact-sql) | Parameter definitions include a data type. |
 | [MS-TDS: RPC Request](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/619c43b6-9495-4a58-9e49-a4950db245b3) | Each RPC parameter carries `TYPE_INFO`. |
 | [MS-TDS: Data Type Dependent Data Streams](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-tds/3f983fde-0509-485a-8c40-a9fa6679a828) | NULL is encoded differently per type. |

@@ -112,7 +112,8 @@ easy to miss.
 
 Columns created by hand or by other tools follow the first table instead. For
 example, a `:string` field on a legacy `text` column also fails, and so does a
-`:date` field on a `datetime2` column that was declared outside Ecto.
+`:naive_datetime` field on a `datetime2(7)` column that was declared outside
+Ecto.
 
 ## Why plain inserts don't fail
 
@@ -204,9 +205,10 @@ its current form):
    [#L313-L323](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L313-L323)).
    Left alone, a tagged nil would fall through to `[col] = @N` bound to a NULL,
    which is never true, and the row would not match: `Ecto.StaleEntryError`
-   instead of an update. Both functions now match the tagged form too. This is
-   the only other place ecto_sql reads a dumped value; `insert_each/2`'s
-   `nil -> DEFAULT` clause cannot see one, because
+   instead of an update. Both functions now match the tagged form too. They
+   are the only place where the generated SQL depends on whether a dumped
+   parameter is nil; `insert_each/2`'s `nil -> DEFAULT` clause cannot see one,
+   because
    [`unzip_inserts/2`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/sql.ex#L996-L1014)
    replaces each present value with its field name and emits a bare `nil` only
    for keys the row does not have.
@@ -315,7 +317,22 @@ is no Ecto type to go on (queries on a table name instead of a schema,
 `fragment/1` parameters, raw SQL), to `:string` (typing a nil string as
 `nvarchar` would fix legacy `text` and `ntext` columns but break `:string`
 fields on `varbinary` columns, the trade-off that closed tds#162), or to
-custom types.
+custom types. Other types keep the untyped nil too, even on columns that
+refuse it: `:map` and `Tds.Ecto.VarChar` fields on `text` or `ntext` columns,
+and a `:decimal` field on a `float` or `real` column. Typing the decimal
+wouldn't help: the driver declares even an explicitly typed nil decimal as
+varbinary
+([types.ex#L1108-L1109](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L1108-L1109)).
+
+Nor is it applied to a nil inside `in ^list`. Ecto dumps the list element by
+element and leaves a nil element bare, so SQL Server refuses to compare it with
+the column: "The data types date and varbinary are incompatible in the equal
+to operator" (error 402). The adapter could type it without changing Ecto,
+because its dumpers are called with `{:in, :date}` as both types
+([type.ex#L460](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/type.ex#L460)),
+and the Postgres adapter already has a clause for that type
+([postgres.ex#L184](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/postgres.ex#L184)).
+This fix leaves lists alone; `known_limitations_test.exs` asserts the error.
 
 One visible change for users: `Ecto.Adapters.SQL.to_sql/3` and the `:params`
 metadata of query telemetry events contain the tag where they contained `nil`,

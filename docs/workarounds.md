@@ -111,6 +111,10 @@ down in [`test/tds_repro/known_limitations_test.exs`](../test/tds_repro/known_li
   parameter: there is no type to use. Use a typed `%Tds.Parameter{}` instead.
 - `insert_all` or `update_all` with nil on a table name instead of a schema,
   without a `type/2` hint.
+- A nil inside `in ^list`, such as `where: r.due_on in ^[nil, ~D[2026-01-01]]`.
+  Ecto leaves a nil element untyped, and SQL Server refuses to compare it with
+  the column (error 402). `x IN (NULL)` never matches anyway, so leave the nil
+  out and add `or is_nil(r.due_on)` if you meant to match NULLs.
 - `:string` fields on legacy `text` or `ntext` columns. Raw SQL with
   `%Tds.Parameter{type: :string}` works for these. Microsoft has
   [deprecated](https://learn.microsoft.com/en-us/sql/t-sql/data-types/ntext-text-and-image-transact-sql)
