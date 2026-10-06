@@ -5,11 +5,14 @@ defmodule TdsRepro.DumpersTest do
   # needs.
   use ExUnit.Case, async: true
 
+  import Ecto.Query
+
   alias Ecto.Adapters.Tds.Connection
+  alias TdsRepro.{AllTypes, Repo}
 
   @adapter Ecto.Adapters.Tds
 
-  # {Ecto type, type the connection declares the NULL as}
+  # {Ecto type, TDS type the adapter tags its nil with}
   @typed_nils [
     date: :date,
     time: :time,
@@ -37,15 +40,17 @@ defmodule TdsRepro.DumpersTest do
   describe "nil for types SQL Server won't accept as varbinary" do
     for {ecto_type, tds_type} <- @typed_nils do
       @tag :bug
-      test "the adapter tags a #{inspect(ecto_type)} nil with its Ecto type" do
-        assert {:ok, {nil, unquote(ecto_type)}} =
+      test "the adapter tags a #{inspect(ecto_type)} nil with #{inspect(tds_type)}" do
+        assert {:ok, {nil, unquote(tds_type)}} =
                  Ecto.Type.adapter_dump(@adapter, unquote(ecto_type), nil)
       end
+    end
 
+    for tds_type <- @typed_nils |> Keyword.values() |> Enum.uniq() do
       @tag :bug
-      test "the connection sends a tagged #{inspect(ecto_type)} nil as a #{inspect(tds_type)} parameter" do
+      test "the connection sends {nil, #{inspect(tds_type)}} as a #{inspect(tds_type)} parameter" do
         assert [%Tds.Parameter{name: "@1", value: nil, type: unquote(tds_type)}] =
-                 Connection.prepare_params([{nil, unquote(ecto_type)}])
+                 Connection.prepare_params([{nil, unquote(tds_type)}])
       end
     end
 
@@ -73,6 +78,18 @@ defmodule TdsRepro.DumpersTest do
         type = unquote(type)
         assert parameter_type(type, nil) == parameter_type(type, Keyword.fetch!(@values, type))
       end
+    end
+  end
+
+  describe "what to_sql/3 shows" do
+    # The params are the dumped values, so a nil shows its tag. to_sql/3 needs
+    # the running Repo but sends nothing to SQL Server.
+    @tag :bug
+    test "a nil parameter carries the TDS type it is declared as" do
+      value = nil
+      query = from(r in AllTypes, update: [set: [utc_datetime_usec_datetimeoffset: ^value]])
+
+      assert {_sql, [{nil, :datetimeoffset}]} = Repo.to_sql(:update_all, query)
     end
   end
 
