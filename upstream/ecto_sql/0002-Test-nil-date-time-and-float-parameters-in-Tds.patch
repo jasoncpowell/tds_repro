@@ -1,20 +1,20 @@
-From ab61a2b5a0057bdda973a111603a5e25fad689af Mon Sep 17 00:00:00 2001
+From 068d0a3456d38773b02386f93b9d3edbec6c0a14 Mon Sep 17 00:00:00 2001
 From: Jason Powell <jasoncpowell@protonmail.com>
 Date: Fri, 18 Sep 2026 13:20:19 -0400
 Subject: [PATCH 2/2] Test nil date, time and float parameters in Tds
 
 test/ecto/type_test.exs: the Tds dumpers tag a nil date, time,
-datetime and float with the TDS type it is declared as, and leave other
-types, non-nil values, arrays and a custom type with a :date primitive
-alone.
+datetime and float with the TDS type a non-nil value of the field is
+sent as, and leave other types, non-nil values, arrays and a custom
+type with a :date primitive alone.
 
 test/ecto/adapters/tds_test.exs: a nil of each of these types, dumped
 through the adapter, is prepared with the parameter type a non-nil
-value of the same field gets, or :float for a float, which
-prepare_params/1 leaves to the driver. A tagged nil is numbered in
-sequence with the other params, a bare nil still goes through untyped,
-and update/5 and delete/4 keep comparing a tagged nil filter with
-IS NULL.
+value of the same field gets, or :float for a float value, which
+prepare_params/1 leaves untyped for the driver. A tagged nil is
+numbered in sequence with the other params, a bare nil still goes
+through untyped, and update/5 and delete/4 keep comparing a tagged nil
+filter with IS NULL.
 
 integration_test/tds/nil_parameters_test.exs: writes nil through
 Repo.insert, Repo.update, Repo.insert_all, Repo.update_all and a
@@ -25,9 +25,9 @@ untyped.
 Co-authored-by: Claude <noreply@anthropic.com>
 ---
  integration_test/tds/nil_parameters_test.exs | 154 +++++++++++++++++++
- test/ecto/adapters/tds_test.exs              |  46 ++++++
- test/ecto/type_test.exs                      |  49 ++++++
- 3 files changed, 249 insertions(+)
+ test/ecto/adapters/tds_test.exs              |  47 ++++++
+ test/ecto/type_test.exs                      |  50 ++++++
+ 3 files changed, 251 insertions(+)
  create mode 100644 integration_test/tds/nil_parameters_test.exs
 
 diff --git a/integration_test/tds/nil_parameters_test.exs b/integration_test/tds/nil_parameters_test.exs
@@ -191,7 +191,7 @@ index 0000000..900b924
 +  end
 +end
 diff --git a/test/ecto/adapters/tds_test.exs b/test/ecto/adapters/tds_test.exs
-index 2e94de1..df44259 100644
+index 2e94de1..bb28b55 100644
 --- a/test/ecto/adapters/tds_test.exs
 +++ b/test/ecto/adapters/tds_test.exs
 @@ -1341,6 +1341,15 @@ defmodule Ecto.Adapters.TdsTest do
@@ -210,7 +210,7 @@ index 2e94de1..df44259 100644
    ## Values List
  
    test "values list: all" do
-@@ -2145,6 +2154,43 @@ defmodule Ecto.Adapters.TdsTest do
+@@ -2145,6 +2154,44 @@ defmodule Ecto.Adapters.TdsTest do
          SQL.prepare_params([%Tds.Parameter{name: "Param"}])
        end
      end
@@ -230,7 +230,8 @@ index 2e94de1..df44259 100644
 +      nil_types = for {type, _value} <- values, do: {type, prepared_type(type, nil)}
 +      value_types = for {type, value} <- values, do: {type, prepared_type(type, value)}
 +
-+      # A float value is left for the driver to type, which makes it :float
++      # prepare_params/1 leaves a float value for the driver to type as :float
++      assert value_types[:float] == nil
 +      assert nil_types == Keyword.replace!(value_types, :float, :float)
 +    end
 +
@@ -255,15 +256,16 @@ index 2e94de1..df44259 100644
  
    defp remove_newlines(string) when is_binary(string) do
 diff --git a/test/ecto/type_test.exs b/test/ecto/type_test.exs
-index 3f18deb..a698210 100644
+index 3f18deb..5670ecd 100644
 --- a/test/ecto/type_test.exs
 +++ b/test/ecto/type_test.exs
-@@ -40,4 +40,53 @@ defmodule Ecto.TypeTest do
+@@ -40,4 +40,54 @@ defmodule Ecto.TypeTest do
      assert adapter_load(Tds, {:map, Elixir.Tds.Ecto.UUID}, %{"a" => @uuid_string}) ==
               {:ok, %{"a" => @uuid_string}}
    end
 +
-+  # SQL Server refuses the varbinary NULL a bare nil becomes for these columns
++  # A bare nil is declared as varbinary, which date, time, datetime2,
++  # datetimeoffset, float and real columns refuse
 +  @tds_tagged_nil_types [
 +    date: :date,
 +    time: :time,

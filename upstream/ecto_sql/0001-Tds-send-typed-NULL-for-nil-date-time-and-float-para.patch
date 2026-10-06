@@ -1,4 +1,4 @@
-From 8aa68bb3c5eda79da30d5eec44800e5fd61ac761 Mon Sep 17 00:00:00 2001
+From c894718192cd91d00092ebee3cf48f193938be22 Mon Sep 17 00:00:00 2001
 From: Jason Powell <jasoncpowell@protonmail.com>
 Date: Fri, 18 Sep 2026 13:13:29 -0400
 Subject: [PATCH 1/2] Tds: send typed NULL for nil date, time and float params
@@ -44,25 +44,26 @@ Refs elixir-ecto/tds#124, elixir-ecto/tds#168
 
 Co-authored-by: Claude <noreply@anthropic.com>
 ---
- lib/ecto/adapters/tds.ex            | 22 ++++++++++++++++++++++
- lib/ecto/adapters/tds/connection.ex | 14 ++++++++++++++
- 2 files changed, 36 insertions(+)
+ lib/ecto/adapters/tds.ex            | 23 +++++++++++++++++++++++
+ lib/ecto/adapters/tds/connection.ex | 15 +++++++++++++++
+ 2 files changed, 38 insertions(+)
 
 diff --git a/lib/ecto/adapters/tds.ex b/lib/ecto/adapters/tds.ex
-index 711eae9..68703e8 100644
+index 711eae9..02ba75c 100644
 --- a/lib/ecto/adapters/tds.ex
 +++ b/lib/ecto/adapters/tds.ex
-@@ -151,11 +151,33 @@ defmodule Ecto.Adapters.Tds do
+@@ -151,11 +151,34 @@ defmodule Ecto.Adapters.Tds do
    def loaders(:binary_id, type), do: [Tds.Ecto.UUID, type]
    def loaders(_, type), do: [type]
  
 +  # The TDS type a nil of these built-in types is sent as. An untyped nil is
-+  # declared as varbinary, which their columns refuse, so tag_nil/2 pairs it
-+  # with the type a non-nil value of the field gets, and the connection passes
-+  # the pair on like {value, :varchar}. It holds only atoms, so this module
-+  # still compiles without tds. Custom types aren't tagged: Ecto never calls
-+  # their dump/1 for nil, so how they store values is unknown. :string is left
-+  # alone on purpose (elixir-ecto/tds#162).
++  # declared as varbinary, which date, time, datetime2, datetimeoffset, float
++  # and real columns refuse, so tag_nil/2 pairs it with the type a non-nil
++  # value of the field gets, and the connection passes the pair on like
++  # {value, :varchar}. It holds only atoms, so this module still compiles
++  # without tds. Custom types aren't tagged: Ecto never calls their dump/1 for
++  # nil, so how they store values is unknown. :string is left alone on purpose
++  # (elixir-ecto/tds#162).
 +  @tagged_nil_types %{
 +    date: :date,
 +    time: :time,
@@ -87,15 +88,16 @@ index 711eae9..68703e8 100644
    defp bool_decode(<<1>>), do: {:ok, true}
    defp bool_decode(0), do: {:ok, false}
 diff --git a/lib/ecto/adapters/tds/connection.ex b/lib/ecto/adapters/tds/connection.ex
-index 170b832..0d9791e 100644
+index 170b832..fb16d12 100644
 --- a/lib/ecto/adapters/tds/connection.ex
 +++ b/lib/ecto/adapters/tds/connection.ex
-@@ -143,6 +143,12 @@ if Code.ensure_loaded?(Tds) do
+@@ -143,6 +143,13 @@ if Code.ensure_loaded?(Tds) do
      defp prepare_raw_param(value) when value == true, do: {1, :boolean}
      defp prepare_raw_param(value) when value == false, do: {0, :boolean}
      defp prepare_raw_param({_, :varchar} = value), do: value
 +
-+    # A nil that Ecto.Adapters.Tds.dumpers/2 paired with its TDS type
++    # A nil that Ecto.Adapters.Tds.dumpers/2 paired with its TDS type. The
++    # list is the set of values of @tagged_nil_types there.
 +    defp prepare_raw_param({nil, type} = value)
 +         when type in [:date, :time, :datetime2, :datetimeoffset, :float],
 +         do: value
@@ -103,7 +105,7 @@ index 170b832..0d9791e 100644
      defp prepare_raw_param(value), do: {value, nil}
  
      defp json_library(), do: Application.get_env(:tds, :json_library, Jason)
-@@ -291,6 +297,10 @@ if Code.ensure_loaded?(Tds) do
+@@ -291,6 +298,10 @@ if Code.ensure_loaded?(Tds) do
            {field, nil}, acc ->
              {[quote_name(field), " IS NULL"], acc + 1}
  
@@ -114,7 +116,7 @@ index 170b832..0d9791e 100644
            {field, _value}, acc ->
              {[quote_name(field), " = @", Integer.to_string(acc)], acc + 1}
  
-@@ -315,6 +325,10 @@ if Code.ensure_loaded?(Tds) do
+@@ -315,6 +326,10 @@ if Code.ensure_loaded?(Tds) do
            {field, nil}, acc ->
              {[quote_name(field), " IS NULL"], acc + 1}
  
