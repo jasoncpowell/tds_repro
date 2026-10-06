@@ -24,6 +24,14 @@ defmodule TdsRepro.DumpersTest do
     float: :float
   ]
 
+  # Ecto's base types (@base in Ecto.Type, ecto 3.14.2)
+  @base_types ~w(
+    integer float decimal boolean string bitstring map binary id binary_id any
+    utc_datetime naive_datetime date time
+    utc_datetime_usec naive_datetime_usec time_usec
+    duration
+  )a
+
   # A non-nil value of each type in @typed_nils. The _usec types need
   # microsecond precision, the others none, or Ecto refuses to dump them.
   @values [
@@ -61,6 +69,32 @@ defmodule TdsRepro.DumpersTest do
     end
   end
 
+  describe "the connection passes on only the tags the adapter emits" do
+    # A wider guard, such as is_atom/1, would send any type, typos included,
+    # to the driver, whose fallback declares a varchar(1) NULL that date, time
+    # and float columns accept without an error.
+    test "a {nil, type} with any other type still gets no type" do
+      assert [%Tds.Parameter{name: "@1", value: {nil, :decimal}, type: nil}] =
+               Connection.prepare_params([{nil, :decimal}])
+    end
+
+    # The guard lists its five TDS types by hand, apart from the adapter's
+    # map, so check it against what the adapter dumps for every base type.
+    test "every base type's nil reaches the driver as nil, with its tag's type" do
+      for type <- @base_types do
+        {:ok, dumped} = Ecto.Type.adapter_dump(@adapter, type, nil)
+        [param] = Connection.prepare_params([dumped])
+
+        assert param.value == nil,
+               "#{inspect(type)} reached the driver as #{inspect(param.value)}"
+
+        with {nil, tds_type} <- dumped do
+          assert param.type == tds_type
+        end
+      end
+    end
+  end
+
   describe "a nil gets the parameter type of a value of its field" do
     # Three places decide these types: the adapter's dumpers for a nil, the
     # connection's prepare_param/1 for a date or time value, and the driver's
@@ -85,7 +119,7 @@ defmodule TdsRepro.DumpersTest do
     # The params are the dumped values, so a nil shows its tag. to_sql/3 needs
     # the running Repo but sends nothing to SQL Server.
     @tag :bug
-    test "a nil parameter carries the TDS type it is declared as" do
+    test "a nil parameter shows the TDS type it is tagged with" do
       value = nil
       query = from(r in AllTypes, update: [set: [utc_datetime_usec_datetimeoffset: ^value]])
 
