@@ -13,8 +13,10 @@ varbinary. Background is in `docs/root-cause.md` and `docs/upstream-history.md`.
 - `mix test`: all tests with the fix. `ECTO_SQL=upstream mix test --only bug`
   must fail entirely; `--exclude bug` must pass.
 - `bin/compare`: both of the above checks, with a summary.
-- `bin/verify-upstream`: applies `upstream/ecto_sql/*.patch` to ecto_sql master
-  and runs the upstream tests with and without the fix.
+- `bin/verify-upstream`: applies `upstream/ecto_sql/*.patch` to ecto_sql master,
+  runs the upstream tests with and without the fix, and runs ecto_sql's
+  `mix test.as_a_dep`. It deletes `tmp/verify-upstream` first, so regenerate
+  the patches from that checkout before rerunning it.
 - `bin/compile-without-tds`: compiles the vendored adapter with tds absent;
   must pass. Needs no SQL Server.
 - `mix format --check-formatted`: must pass.
@@ -34,7 +36,8 @@ varbinary. Background is in `docs/root-cause.md` and `docs/upstream-history.md`.
   rerun `bin/verify-upstream` afterwards.
 - `lib/ecto/adapters/tds.ex` must compile without tds
   (`bin/compile-without-tds`); never expand a Tds struct there. Only the
-  guarded connection and types modules may.
+  guarded connection and types modules may. Atoms such as TDS type names are
+  fine there.
 - `ECTO_SQL=upstream` builds into `_build_upstream` so the two ecto_sql
   versions never share compiled code.
 - Tests tagged `:bug` fail on released ecto_sql and pass with the fix. Every

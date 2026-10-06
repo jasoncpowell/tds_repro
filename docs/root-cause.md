@@ -151,29 +151,47 @@ its own example appends a function that re-encodes values for the database.
 ## The fix
 
 The fix has three parts, all in the vendored ecto_sql (`git log -p --
-vendor/ecto_sql` shows the commits after the vendoring one, starting with
-`4d570f4`, the first version):
+vendor/ecto_sql` shows the commits after the vendoring one: `4d570f4`, the
+first version, then `38d4687`, `eb3a864` and `cbe5fdf`, which gave the tag
+its current form):
 
-1. **The adapter tags the nil.** [`Ecto.Adapters.Tds.dumpers/2`](../vendor/ecto_sql/lib/ecto/adapters/tds.ex)
+1. **The adapter tags the nil with its TDS type.** [`Ecto.Adapters.Tds.dumpers/2`](../vendor/ecto_sql/lib/ecto/adapters/tds.ex)
    appends a dumper for the eight affected Ecto types. It leaves non-nil
-   values alone and turns a nil into a tuple of the nil and its Ecto type,
-   such as `{nil, :date}`. This is the shape `Tds.Ecto.VarChar` already
-   uses when it dumps a string as `{value, :varchar}`
-   ([types.ex#L287-L289](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L287-L289)),
-   with one difference that matters: `Tds.Ecto.VarChar` is an `Ecto.Type`, so
-   Ecto short-circuits nil before its `dump/1` runs and it can never tag a
-   nil. This tag can, which is what part 3 is for.
-   The clause is `dumpers(type, type) when type in @tagged_nil_types`: it
-   matches only when the Ecto type is its own primitive, so built-in types
-   are tagged and custom types are not (see below).
-2. **The connection types the parameter.** [`Ecto.Adapters.Tds.Connection.prepare_params/1`](../vendor/ecto_sql/lib/ecto/adapters/tds/connection.ex)
+   values alone and turns a nil into a pair of the nil and the TDS type a
+   non-nil value of the field is sent as, such as `{nil, :datetime2}` for a
+   `:naive_datetime` field. The map from Ecto type to TDS type,
+   `@tagged_nil_types`, is in the adapter because the dumpers are where Ecto
+   translates values "coming from the Ecto into adapter ones"
+   ([adapter.ex#L101-L108](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/adapter.ex#L101-L108)),
+   and this adapter already emits SQL Server's own forms there, such as the
+   byte order `Tds.Ecto.UUID` gives a `:binary_id`. The pair has both the
+   shape and the meaning of the `{value, :varchar}` that `Tds.Ecto.VarChar`
+   dumps
+   ([types.ex#L287-L289](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/types.ex#L287-L289)):
+   a value paired with a driver type. One difference matters:
+   `Tds.Ecto.VarChar` is an `Ecto.Type`, so Ecto short-circuits nil before
+   its `dump/1` runs and it can never tag a nil. This pair can, which is what
+   part 3 is for. The clause is
+   `dumpers(type, type) when is_map_key(@tagged_nil_types, type)`: it matches
+   only when the Ecto type is its own primitive, so built-in types are tagged
+   and custom types are not (see below).
+2. **The connection passes the pair through.** [`Ecto.Adapters.Tds.Connection.prepare_params/1`](../vendor/ecto_sql/lib/ecto/adapters/tds/connection.ex)
    already turns every parameter into a numbered `%Tds.Parameter{}`
-   ([connection.ex#L79-L95](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L79-L95)).
-   A new `prepare_raw_param/1` clause, just before the existing one for
-   `{_, :varchar}` ([#L145](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L145)),
-   maps the tag to a TDS type. The tagged nil then takes the same path as
-   every other parameter. The driver keeps an explicit type and only falls
-   back to `:binary` when there is none.
+   ([connection.ex#L79-L95](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L79-L95))
+   and passes `{value, :varchar}` on unchanged
+   ([#L145](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L145)).
+   A new `prepare_raw_param/1` clause right after that one passes on
+   `{nil, tds_type}` the same way. The connection's parameter code still
+   handles only plain values and values already paired with a driver type,
+   as it did before the fix. The clause admits only the five TDS types the
+   adapter emits. With a wider guard such as `is_atom/1`, a wrong type would
+   reach the driver's fallback, which declares an unknown type as a
+   `varchar(1)` NULL
+   ([types.ex#L1075-L1095](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L1075-L1095)),
+   and date, time and float columns accept that without an error. With the
+   allow-list, a mismatch reaches the driver as a tuple value and fails. The
+   driver keeps an explicit type and only falls back to `:binary` when there
+   is none.
 3. **The filter clauses keep comparing with `IS NULL`.** A dumped value is not
    only parameter data. `Repo.update/2` and `Repo.delete/2` dump
    `changeset.filters` through the same dumpers
@@ -193,21 +211,25 @@ vendor/ecto_sql` shows the commits after the vendoring one, starting with
    replaces each present value with its field name and emits a bare `nil` only
    for keys the row does not have.
 
-| Ecto field type | NULL is declared as |
-|---|---|
-| `:date` | `date` |
-| `:time`, `:time_usec` | `time` |
-| `:naive_datetime`, `:naive_datetime_usec` | `datetime2` |
-| `:utc_datetime`, `:utc_datetime_usec` | `datetimeoffset` |
-| `:float` | `float` by the connection; the driver then declares it as `decimal(1,0)` |
+| Ecto field type | Tag | NULL is declared as |
+|---|---|---|
+| `:date` | `{nil, :date}` | `date` |
+| `:time`, `:time_usec` | `{nil, :time}` | `time` |
+| `:naive_datetime`, `:naive_datetime_usec` | `{nil, :datetime2}` | `datetime2` |
+| `:utc_datetime`, `:utc_datetime_usec` | `{nil, :datetimeoffset}` | `datetimeoffset` |
+| `:float` | `{nil, :float}` | `decimal(1,0)`, by the driver |
 
-For the date and time types these are exactly the types `prepare_param/1`
-declares for non-nil `%Date{}`, `%Time{}`, `%NaiveDateTime{}` and `%DateTime{}`
+For the date and time types these are the parameter types `prepare_param/1`
+gives non-nil `%Date{}`, `%Time{}`, `%NaiveDateTime{}` and `%DateTime{}`
 values ([connection.ex#L102-L117](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/tds/connection.ex#L102-L117)),
-so a nil and a value in the same field reach SQL Server with the same declared
-type. `:float` is the exception. The connection declares the nil as `:float`,
-but the tds driver declares a `:float` parameter whose value is nil as
-`decimal(1,0)`
+so a nil and a value of the same field get the same parameter type. Only the
+precision in the declaration differs: the driver writes a value's precision
+into it, as in `datetime2(6)`, and declares a nil with the default, plain
+`datetime2`
+([types.ex#L988-L1016](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L988-L1016)).
+`:float` is the exception. The adapter tags the nil `:float`, the type the
+driver infers for a non-nil float, but the tds driver declares a `:float`
+parameter whose value is nil as `decimal(1,0)`
 ([`encode_float_descriptor/1`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L1150))
 and sends the value itself as a varbinary NULL
 ([`encode_float_type/1`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L923-L925)
@@ -217,6 +239,12 @@ SQL Server converts the argument to the declared decimal and the decimal to
 sends exactly this parameter and shows it accepted by both column types, next
 to the date and time NULLs against every date and time column type. Every
 other Ecto type dumps as before.
+
+The adapter decides a nil's type, and the connection, or for a float the
+driver, decides a value's, so the two have to agree. `dumpers_test.exs`
+checks that they do for all eight types: it dumps a nil and a value through
+the adapter and compares the parameter types they reach the driver with.
+Upstream, `tds_test.exs` has the same test.
 
 ### Why the adapter tags instead of building the parameter
 
@@ -238,6 +266,20 @@ undefined, cannot expand struct Tds.Parameter`. `bin/compile-without-tds`
 repeats that check. Tagging with a plain tuple keeps tds out of the adapter
 at compile time, and the struct is built in the connection, which only
 compiles when the driver is loaded.
+
+The tag holds only atoms, such as `:datetime2`, which need nothing from tds at
+compile time. Only expanding a Tds struct is ruled out: the adapter already
+calls tds at runtime, as in `Tds.Ecto.UUID` in its `:binary_id` dumper and
+`Tds.json_library/0` in its JSON loader. `bin/compile-without-tds` has one
+blind spot: the beams of the guarded modules, compiled with tds, are on its
+code path, so it can't see a compile-time reference to one of them.
+`bin/verify-upstream` covers that by running ecto_sql's own
+`mix test.as_a_dep`
+([mix.exs#L30-L32](https://github.com/elixir-ecto/ecto_sql/blob/f049198/mix.exs#L30-L32),
+[#L130-L152](https://github.com/elixir-ecto/ecto_sql/blob/f049198/mix.exs#L130-L152)),
+which compiles ecto_sql as a dependency without its optional drivers. With
+the first version's `tds.ex` it fails with the same "cannot expand struct
+Tds.Parameter" error.
 
 ### Why custom types are left alone
 
@@ -273,10 +315,22 @@ is no Ecto type to go on (queries on a table name instead of a schema,
 `fragment/1` parameters, raw SQL), to `:string` (typing a nil string as
 `nvarchar` would fix legacy `text` and `ntext` columns but break `:string`
 fields on `varbinary` columns, the trade-off that closed tds#162), or to
-custom types. One visible change for users: `Ecto.Adapters.SQL.to_sql/3` and
-the `:params` metadata of query telemetry events contain `{nil, :date}` and
-the like where they contained `nil`; logged parameters are the cast values and
-still show `nil`.
+custom types.
+
+One visible change for users: `Ecto.Adapters.SQL.to_sql/3` and the `:params`
+metadata of query telemetry events contain the tag where they contained `nil`,
+so a `:utc_datetime` field shows `{nil, :datetimeoffset}`. Ecto documents
+`:params` as "the dumped query parameters (formatted for database drivers like
+Postgrex)", next to `:cast_params`, which still show `nil`
+([repo.ex#L213-L214](https://github.com/elixir-ecto/ecto/blob/v3.14.2/lib/ecto/repo.ex#L213-L214)).
+On Tds they already hold driver forms, such as `Tds.Ecto.UUID`'s bytes
+([logging.exs#L74-L87](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/integration_test/sql/logging.exs#L74-L87)).
+Log lines show the cast values whenever a call passes them
+([sql.ex#L1291](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/sql.ex#L1291)),
+as every Repo call does, so they still show `nil`.
+`Ecto.Adapters.SQL.explain/4` passes none
+([#L532-L552](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/lib/ecto/adapters/sql.ex#L532-L552)),
+so its log line shows the tag.
 
 The test suite covers what this fixes, what it doesn't, and that nothing else
 changes; see the README.

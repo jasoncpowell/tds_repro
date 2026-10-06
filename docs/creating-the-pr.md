@@ -10,14 +10,16 @@ repo owner agrees.
 
 The two patches in [`upstream/ecto_sql/`](../upstream/ecto_sql):
 
-1. **The fix:** `lib/ecto/adapters/tds.ex` (the dumpers tag a nil with its
-   Ecto type) and `lib/ecto/adapters/tds/connection.ex` (`prepare_params/1`
-   turns the tag into a typed `%Tds.Parameter{}`), identical to the vendored
-   fix in this repo.
+1. **The fix:** `lib/ecto/adapters/tds.ex` (the dumpers tag a nil with the
+   TDS type it is declared as) and `lib/ecto/adapters/tds/connection.ex`
+   (`prepare_params/1` passes the tag on as a typed `%Tds.Parameter{}`, and
+   `update/5` and `delete/4` still compare a tagged nil filter with
+   `IS NULL`), identical to the vendored fix in this repo.
 2. **Tests:** unit tests in `test/ecto/type_test.exs`, next to the existing
    Tds `adapter_dump` tests, and in `test/ecto/adapters/tds_test.exs` for
-   `prepare_params/1`, plus `integration_test/tds/nil_parameters_test.exs`,
-   modeled on `integration_test/tds/constraints_test.exs`.
+   `prepare_params/1`, `update/5` and `delete/4`, plus
+   `integration_test/tds/nil_parameters_test.exs`, modeled on
+   `integration_test/tds/constraints_test.exs`.
 
 No CHANGELOG entry: every CHANGELOG commit in ecto_sql is by the maintainer,
 so contributors leave it alone.
@@ -37,7 +39,8 @@ bin/verify-upstream
 ```
 
 It clones ecto_sql master, applies the patches, runs the new tests with the fix
-(they must pass) and without it (they must fail). Every line must read `ok`.
+(they must pass) and without it (they must fail), and runs ecto_sql's own
+`mix test.as_a_dep` with the fix. Every line must read `ok`.
 
 Also run:
 
@@ -48,10 +51,12 @@ bin/compile-without-tds
 It compiles the vendored adapter with tds absent from the code path. tds is an
 optional dependency of ecto_sql and `lib/ecto/adapters/tds.ex` has no
 `Code.ensure_loaded?(Tds)` guard, so a reference to `Tds.Parameter` there
-breaks every ecto_sql user without the driver. ecto_sql's own suite always has
-tds available and cannot catch this. The `lib/ecto/adapters/tds.ex` hunk in
-patch 1 is identical to the vendored file, so checking the vendored copy checks
-the patch.
+breaks every ecto_sql user without the driver. ecto_sql's CI runs `mix test`,
+which always has tds available and cannot catch this. Its `mix test.all` alias
+also runs `mix test.as_a_dep`, which compiles ecto_sql as a dependency without
+tds and does catch it; that is the check `bin/verify-upstream` runs. The
+`lib/ecto/adapters/tds.ex` hunk in patch 1 is identical to the vendored file,
+so checking the vendored copy checks the patch.
 
 If the patches no longer apply because master changed, apply them by hand in
 `tmp/verify-upstream/ecto_sql`, resolve the conflict, rerun the tests there,
@@ -60,6 +65,27 @@ then regenerate the patches from that checkout and commit them to this repo:
 ```sh
 git -C tmp/verify-upstream/ecto_sql format-patch origin/master..HEAD -o "$PWD/upstream/ecto_sql"
 ```
+
+To change the fix itself, commit the change to `vendor/ecto_sql` first, as its
+own commit. Then fold it into patch 1, which must stay the single squash of the
+vendored fix commits: the script's "without the fix" run restores the files
+from before the last commit that touched `tds.ex`. Interactive rebase isn't
+needed:
+
+```sh
+bin/verify-upstream                          # fresh checkout with the current patches
+E=tmp/verify-upstream/ecto_sql
+git -C $E reset --hard HEAD~1                # drop the test commit; patch 2 still has it
+git diff --relative=vendor/ecto_sql <commit>^ <commit> | git -C $E apply
+git -C $E commit -a --amend                  # update the message too
+git -C $E am -3 "$PWD"/upstream/ecto_sql/0002-*.patch
+# edit the tests, then: git -C $E commit -a --amend
+```
+
+Run step 4's checks in `$E`, then `git rm upstream/ecto_sql/*.patch` before
+regenerating: `format-patch -o` leaves a renamed patch behind, and the script
+applies every one. `bin/verify-upstream` starts by deleting
+`tmp/verify-upstream`, so don't rerun it until the patches are regenerated.
 
 The outgoing commits carry `Co-authored-by: Claude <noreply@anthropic.com>`:
 unversioned, because a product version dates the commit and means nothing to a

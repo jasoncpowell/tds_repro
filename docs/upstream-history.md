@@ -35,7 +35,7 @@ Both issues are still open, and neither links to a PR.
 | Point raised | By | Response |
 |---|---|---|
 | Setting date/time fields to nil fails, including via `insert_all` | puruzio, enrico, jaybarra | Fixed for every Ecto date/time type, on `Repo.update`, `insert_all` and `update_all`. |
-| The fix may belong in Ecto's adapter, not the driver | mjaric | The change is in ecto_sql: `Ecto.Adapters.Tds.dumpers/2` tags the nil with its Ecto type, and `Ecto.Adapters.Tds.Connection.prepare_params/1` declares the parameter type. |
+| The fix may belong in Ecto's adapter, not the driver | mjaric | The change is in ecto_sql: `Ecto.Adapters.Tds.dumpers/2` tags the nil with the TDS type it is declared as, and `Ecto.Adapters.Tds.Connection.prepare_params/1` passes it to the driver as a typed parameter. |
 | Changing the driver's fallback breaks other column types | rschenk, wojtekmach, mjaric | The fallback is untouched. Types other than the built-in date/time and float types, custom types included, dump exactly as before. |
 | `:binary_id` support matters most | mjaric | Unaffected: UUID columns accept nil before and after. |
 | NULL can't be encoded without a type; a hint is required | mjaric | The hint comes from the schema field's Ecto type. Nothing is inferred from the nil. |
