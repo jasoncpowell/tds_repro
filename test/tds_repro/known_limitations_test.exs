@@ -1,7 +1,7 @@
 defmodule TdsRepro.KnownLimitationsTest do
-  # Writes that fail on released ecto_sql and still fail with the fix. Each
-  # test asserts the SQL Server error, so it passes on both, and a change in
-  # behaviour shows up as a failure.
+  # Writes and filters that fail on released ecto_sql and still fail with the
+  # fix. Each test asserts the SQL Server error, so it passes on both, and a
+  # change in behaviour shows up as a failure.
   use ExUnit.Case
 
   import Ecto.Changeset
@@ -33,6 +33,17 @@ defmodule TdsRepro.KnownLimitationsTest do
         query = from(r in AllTypes, where: r.id == ^row.id)
         assert_refused(206, fn -> Repo.update_all(query, set: [{@field, nil}]) end)
       end
+    end
+  end
+
+  # Ecto dumps the list for in ^list element by element and leaves a nil
+  # element bare, so it reaches the driver untyped and is compared as
+  # varbinary.
+  describe "a nil inside in ^list (not covered by the fix)" do
+    test "Repo.all/2 can't filter a date field on a list with a nil element" do
+      values = [nil, ~D[2026-01-01]]
+      query = from(r in AllTypes, where: r.date_date in ^values)
+      assert_refused(402, fn -> Repo.all(query) end)
     end
   end
 
