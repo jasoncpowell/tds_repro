@@ -18,6 +18,11 @@
 # twice about Tds functions it calls at runtime (Tds.json_library/0 and
 # Tds.start_link/1); those are expected. Needs no SQL Server. Output is
 # written to tmp/compile-without-tds/.
+#
+# It can't see a compile-time reference from the adapter to a guarded module:
+# _build/dev/lib/ecto_sql/ebin, on the code path, already holds those modules,
+# compiled with tds. bin/verify-upstream covers that with ecto_sql's own
+# mix test.as_a_dep, which compiles ecto_sql as a dependency without tds.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 source bin/lib/summary.sh
