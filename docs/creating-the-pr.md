@@ -11,7 +11,7 @@ repo owner agrees.
 The two patches in [`upstream/ecto_sql/`](../upstream/ecto_sql):
 
 1. **The fix:** `lib/ecto/adapters/tds.ex` (the dumpers tag a nil with the
-   TDS type it is declared as) and `lib/ecto/adapters/tds/connection.ex`
+   TDS type a non-nil value of the field is sent as) and `lib/ecto/adapters/tds/connection.ex`
    (`prepare_params/1` passes the tag on as a typed `%Tds.Parameter{}`, and
    `update/5` and `delete/4` still compare a tagged nil filter with
    `IS NULL`), identical to the vendored fix in this repo.
@@ -21,8 +21,9 @@ The two patches in [`upstream/ecto_sql/`](../upstream/ecto_sql):
    `integration_test/tds/nil_parameters_test.exs`, modeled on
    `integration_test/tds/constraints_test.exs`.
 
-No CHANGELOG entry: every CHANGELOG commit in ecto_sql is by the maintainer,
-so contributors leave it alone.
+No CHANGELOG entry: 79 of the 84 commits that touch ecto_sql's `CHANGELOG.md`
+(as of master `f049198`) are by its core team, who write the entries, so
+contributors leave it alone.
 
 The PR description is between the `pr-body` markers in [pr-draft.md](pr-draft.md).
 
@@ -50,7 +51,7 @@ bin/compile-without-tds
 
 It compiles the vendored adapter with tds absent from the code path. tds is an
 optional dependency of ecto_sql and `lib/ecto/adapters/tds.ex` has no
-`Code.ensure_loaded?(Tds)` guard, so a reference to `Tds.Parameter` there
+`Code.ensure_loaded?(Tds)` guard, so a `%Tds.Parameter{}` struct there
 breaks every ecto_sql user without the driver. ecto_sql's CI runs `mix test`,
 which always has tds available and cannot catch this. Its `mix test.all` alias
 also runs `mix test.as_a_dep`, which compiles ecto_sql as a dependency without
@@ -77,20 +78,23 @@ bin/verify-upstream                          # fresh checkout with the current p
 E=tmp/verify-upstream/ecto_sql
 git -C $E reset --hard HEAD~1                # drop the test commit; patch 2 still has it
 git diff --relative=vendor/ecto_sql <commit>^ <commit> | git -C $E apply
-git -C $E commit -a --amend                  # update the message too
+git -C $E commit -a --amend --no-edit        # or -F <file> for a new message
 git -C $E am -3 "$PWD"/upstream/ecto_sql/0002-*.patch
-# edit the tests, then: git -C $E commit -a --amend
+# edit the tests, then: git -C $E commit -a --amend -F <file>
 ```
 
-Run step 4's checks in `$E`, then `git rm upstream/ecto_sql/*.patch` before
-regenerating: `format-patch -o` leaves a renamed patch behind, and the script
+Pass messages with `-F` or `--no-edit`: without a terminal, as when Claude
+runs this, a bare `--amend` keeps the old message without a word. A message
+file replaces the whole message, so keep the `Refs` line and the trailer
+below. Run step 4's checks in `$E`, then `git rm upstream/ecto_sql/*.patch`
+before regenerating: `format-patch -o` leaves a renamed patch behind, and the script
 applies every one. `bin/verify-upstream` starts by deleting
 `tmp/verify-upstream`, so don't rerun it until the patches are regenerated.
 
 The outgoing commits carry `Co-authored-by: Claude <noreply@anthropic.com>`:
 unversioned, because a product version dates the commit and means nothing to a
-reviewer, and lowercase, because that is the spelling every one of the 15
-co-author trailers in ecto_sql's history uses. Keep that form when regenerating
+reviewer, and lowercase, because that is the spelling every co-author
+trailer in ecto_sql's history uses (16 as of master `f049198`). Keep that form when regenerating
 the patches; `git format-patch` reproduces whatever the commits say, so check
 the trailers after any rebase or amend.
 
@@ -119,10 +123,13 @@ git am -3 ../tds_repro/upstream/ecto_sql/*.patch
 mix deps.get
 mix format --check-formatted
 mix test
+mix test.as_a_dep
 MSSQL_URL='sa:some!Password@localhost:1433' ECTO_ADAPTER=tds mix test
 ```
 
-The last command is the full Tds integration suite, the same one ecto_sql's CI
+`mix test.as_a_dep` compiles ecto_sql as a dependency without its optional
+drivers, which is how a `%Tds.Parameter{}` in `lib/ecto/adapters/tds.ex` would
+show up. The last command is the full Tds integration suite, the same one ecto_sql's CI
 runs against SQL Server 2019 and 2022 (see its CI workflow). It drops and
 recreates a database named `ecto_test`. Compare any failures against a run on
 `upstream/master` without the patches: only failures that appear with the

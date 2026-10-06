@@ -154,7 +154,7 @@ its own example appends a function that re-encodes values for the database.
 The fix has three parts, all in the vendored ecto_sql (`git log -p --
 vendor/ecto_sql` shows the commits after the vendoring one: `4d570f4`, the
 first version, then `38d4687`, `eb3a864` and `cbe5fdf`, which gave the tag
-its current form):
+its current form, and `aa038c9`, which only corrects its comments):
 
 1. **The adapter tags the nil with its TDS type.** [`Ecto.Adapters.Tds.dumpers/2`](../vendor/ecto_sql/lib/ecto/adapters/tds.ex)
    appends a dumper for the eight affected Ecto types. It leaves non-nil
@@ -245,8 +245,11 @@ other Ecto type dumps as before.
 The adapter decides a nil's type, and the connection, or for a float the
 driver, decides a value's, so the two have to agree. `dumpers_test.exs`
 checks that they do for all eight types: it dumps a nil and a value through
-the adapter and compares the parameter types they reach the driver with.
-Upstream, `tds_test.exs` has the same test.
+the adapter and the connection and compares the types the driver ends up
+with, after `Tds.Parameter.fix_data_type/1`. Upstream, `tds_test.exs` has a
+similar test that calls no tds internals, so it stops at `prepare_params/1`:
+it checks that a float value is still untyped there and takes `:float` as
+its type instead of asking the driver.
 
 ### Why the adapter tags instead of building the parameter
 
@@ -270,15 +273,16 @@ at compile time, and the struct is built in the connection, which only
 compiles when the driver is loaded.
 
 The tag holds only atoms, such as `:datetime2`, which need nothing from tds at
-compile time. Only expanding a Tds struct is ruled out: the adapter already
-calls tds at runtime, as in `Tds.Ecto.UUID` in its `:binary_id` dumper and
-`Tds.json_library/0` in its JSON loader. `bin/compile-without-tds` has one
-blind spot: the beams of the guarded modules, compiled with tds, are on its
-code path, so it can't see a compile-time reference to one of them.
-`bin/verify-upstream` covers that by running ecto_sql's own
-`mix test.as_a_dep`
-([mix.exs#L30-L32](https://github.com/elixir-ecto/ecto_sql/blob/f049198/mix.exs#L30-L32),
-[#L130-L152](https://github.com/elixir-ecto/ecto_sql/blob/f049198/mix.exs#L130-L152)),
+compile time. What is ruled out is compile-time use of tds or of the guarded
+modules: expanding a Tds struct, or a `require`, `import` or module-attribute
+call. Runtime calls are fine, and the adapter already makes them, as in
+`Tds.Ecto.UUID` in its `:binary_id` dumper and `Tds.json_library/0` in its
+JSON loader. `bin/compile-without-tds` has one blind spot: the beams of the
+guarded modules, compiled with tds, are on its code path, so it can't see a
+compile-time reference to one of them. `bin/verify-upstream` covers that by
+running ecto_sql's own `mix test.as_a_dep`
+([mix.exs#L30-L32](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/mix.exs#L30-L32),
+[#L130-L152](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/mix.exs#L130-L152)),
 which compiles ecto_sql as a dependency without its optional drivers. With
 the first version's `tds.ex` it fails with the same "cannot expand struct
 Tds.Parameter" error.
@@ -323,6 +327,7 @@ and a `:decimal` field on a `float` or `real` column. Typing the decimal
 wouldn't help: the driver declares even an explicitly typed nil decimal as
 varbinary
 ([types.ex#L1108-L1109](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/types.ex#L1108-L1109)).
+`known_limitations_test.exs` asserts SQL Server's error 206 for each.
 
 Nor is it applied to a nil inside `in ^list`. Ecto dumps the list element by
 element and leaves a nil element bare, so SQL Server refuses to compare it with

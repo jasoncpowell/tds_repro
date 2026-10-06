@@ -37,12 +37,12 @@ Both issues are still open, and neither links to a PR.
 | Point raised | By | Response |
 |---|---|---|
 | Setting date/time fields to nil fails, including via `insert_all` | puruzio, enrico, jaybarra | Fixed for every Ecto date/time type, on `Repo.update`, `insert_all` and `update_all`. |
-| The fix may belong in Ecto's adapter, not the driver | mjaric | The change is in ecto_sql: `Ecto.Adapters.Tds.dumpers/2` tags the nil with the TDS type it is declared as, and `Ecto.Adapters.Tds.Connection.prepare_params/1` passes it to the driver as a typed parameter. |
+| The fix may belong in Ecto's adapter, not the driver | mjaric | The change is in ecto_sql: `Ecto.Adapters.Tds.dumpers/2` tags the nil with the TDS type a non-nil value of the field is sent as, and `Ecto.Adapters.Tds.Connection.prepare_params/1` passes it to the driver as a typed parameter. |
 | Changing the driver's fallback breaks other column types | rschenk, wojtekmach, mjaric | The fallback is untouched. Types other than the built-in date/time and float types, custom types included, dump exactly as before. |
 | `:binary_id` support matters most | mjaric | Unaffected: UUID columns accept nil before and after. |
 | NULL can't be encoded without a type; a hint is required | mjaric | The hint comes from the schema field's Ecto type. Nothing is inferred from the nil. |
-| Calendar types, float, "and potentially others" | wojtekmach | All calendar types and float are fixed. The only other failure found is `:string` fields on legacy `text`/`ntext` columns, which the fix doesn't cover. |
-| Do some code paths drop the type before the driver? | mjaric | Ecto passes every schema-typed value through the adapter's dumpers (since ecto#4214), so updates, `insert_all` and `update_all` all get typed. Values with no type (queries on a table name, `fragment`, raw SQL) still fail, as before. |
+| Calendar types, float, "and potentially others" | wojtekmach | All calendar types and float are fixed for built-in fields. Still refused, as before: `:string`, `:map` and `Tds.Ecto.VarChar` fields on legacy `text`/`ntext` columns, `:decimal` fields on `float`/`real` columns, custom types with these primitives, and a nil inside `in ^list`. The PR draft lists them under "Not covered". |
+| Do some code paths drop the type before the driver? | mjaric | Ecto passes every schema-typed value through the adapter's dumpers (since ecto#4214), so updates, `insert_all` and `update_all` all get typed. Values with no type (queries on a table name, `fragment`, raw SQL) still fail, as before. One typed path drops the type: Ecto dumps `in ^list` element by element and leaves a nil element bare, so it still goes out untyped (error 402). The adapter could type it with a `dumpers({:in, type}, {:in, type})` clause, but the fix leaves lists alone. |
 | Don't rely on implicit conversion | mjaric | Date and time nils get the same parameter types ecto_sql already sends for non-nil values of those fields. A nil float is tagged `:float`, which the driver declares as `decimal(1,0)`; SQL Server converts that to `float` and `real` implicitly. That is the one conversion the fix relies on that non-nil values of these fields don't already rely on. |
 | `type(^value, :date)` means giving up changesets | abueloshika | Changesets work without it. The fix also makes `type(^nil, :float)` work, which fails today (error 529). |
 | Tests passed without exercising the changed code | rschenk | This repo's tests go through `Ecto.Type.adapter_dump/3` and real `Repo` calls against SQL Server, and the upstream tests do the same. |
@@ -71,8 +71,10 @@ the layer that knows it:
   five tds parameter types: `:date`, `:time`, `:datetime2`, `:datetimeoffset`
   and `:float`. tds doesn't document them; `Tds.Parameter` is
   [`@moduledoc false`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L2).
-  But `prepare_param/1` already relies on the same names, and the tds v3
-  redesign on the [`next`](https://github.com/elixir-ecto/tds/tree/next)
+  But `prepare_param/1` already relies on four of them, and the driver itself
+  types a float value `:float`
+  ([parameter.ex#L119-L122](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L119-L122)).
+  The tds v3 redesign on the [`next`](https://github.com/elixir-ecto/tds/tree/next)
   branch keeps all five
   ([datetime.ex#L54-L56](https://github.com/elixir-ecto/tds/blob/de6a27311d/lib/tds/type/datetime.ex#L54-L56),
   [float.ex#L21](https://github.com/elixir-ecto/tds/blob/de6a27311d/lib/tds/type/float.ex#L21)).

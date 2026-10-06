@@ -9,8 +9,10 @@ docs), which were checked on 2026-09-18, and the rows for the filter clauses
 (`update/5`, `delete/4`, `dump_fields!` and `unzip_inserts/2`), which were
 checked on 2026-09-21, and the rows for the TDS-typed tag (the dumpers and
 telemetry docs, logging, the driver's declarations), `mix test.as_a_dep`, the
-master commit, the `in ^list` and nil decimal limitations, tds's v3 type names
-and the issue timelines, which were checked on 2026-10-06.
+master commit, the `in ^list` and nil decimal limitations, tds's v3 type names,
+the issue timelines and ecto_sql's CHANGELOG and co-author history, which were
+checked on 2026-10-06. The rows for `prepare_param/1`'s line ranges,
+`Tds.Ecto.VarChar` and `type/0` were also rechecked on 2026-10-06.
 
 ## Upstream reports and discussion
 
@@ -80,7 +82,8 @@ and the issue timelines, which were checked on 2026-10-06.
 | [elixir-ecto/ecto_sql#184](https://github.com/elixir-ecto/ecto_sql/pull/184) (2020-03-10) | Tds adapter merged into ecto_sql. |
 | ecto_sql [`Earthfile`](https://github.com/elixir-ecto/ecto_sql/blob/2385763/Earthfile) and [CI workflow](https://github.com/elixir-ecto/ecto_sql/blob/2385763/.github/workflows/ci.yml) | Upstream CI runs Tds integration tests against SQL Server 2019 and 2022. |
 | ecto_sql master [`f049198`](https://github.com/elixir-ecto/ecto_sql/commit/f049198) (2026-10-05) | Still sends nil without a type; the bug is unresolved on master. The patches in `upstream/ecto_sql/` are generated against this commit. |
-| ecto_sql master [`mix.exs#L30-L32`](https://github.com/elixir-ecto/ecto_sql/blob/f049198/mix.exs#L30-L32), [`#L130-L152`](https://github.com/elixir-ecto/ecto_sql/blob/f049198/mix.exs#L130-L152) | `mix test.all` includes `mix test.as_a_dep`, which compiles ecto_sql as a dependency without its optional drivers. |
+| ecto_sql [`mix.exs#L30-L32`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/mix.exs#L30-L32), [`#L130-L152`](https://github.com/elixir-ecto/ecto_sql/blob/v3.14.0/mix.exs#L130-L152) (v3.14.0; the same lines on master `f049198`) | `mix test.all` includes `mix test.as_a_dep`, which compiles ecto_sql as a dependency without its optional drivers. |
+| ecto_sql [`CHANGELOG.md` history](https://github.com/elixir-ecto/ecto_sql/commits/f049198/CHANGELOG.md) and commit messages at master `f049198` | 79 of the 84 commits that touch `CHANGELOG.md` are by the core team (José Valim, Wojtek Mach, Greg Rychlewski); all 16 co-author trailers are spelled `Co-authored-by`. |
 
 ## Ecto, ecto_sql and tds documentation
 
