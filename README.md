@@ -19,8 +19,8 @@ both still open.
 | | |
 |---|---|
 | **Bug** | Reproduces on the latest releases (ecto_sql 3.14.0, ecto 3.14.2, tds 2.3.8) and on ecto_sql master, against SQL Server 2017, 2019 and 2022. |
-| **Fix** | Three small changes in two files of ecto_sql's Tds adapter: `Ecto.Adapters.Tds.dumpers/2` tags a nil of the affected Ecto types with its type, `Ecto.Adapters.Tds.Connection.prepare_params/1` turns the tag into a typed `%Tds.Parameter{}`, and `update/5` and `delete/4` keep comparing such a nil filter with `IS NULL`. Applied to the copy of ecto_sql in [`vendor/ecto_sql`](vendor/ecto_sql) (`git log -p -- vendor/ecto_sql` shows it). All 162 tests in this repo pass with it. |
-| **Upstream PR** | Ready, not submitted. The fix and its tests are in [`upstream/ecto_sql/`](upstream/ecto_sql) and pass on ecto_sql master: ecto_sql's full unit suite, and its full Tds integration suite against SQL Server 2022, with no regressions (the first version of the fix also passed on 2017 and 2019). See the [PR draft](docs/pr-draft.md) and [how to submit it](docs/creating-the-pr.md). |
+| **Fix** | Three small changes in two files of ecto_sql's Tds adapter: `Ecto.Adapters.Tds.dumpers/2` tags a nil of the affected Ecto types with the TDS type a non-nil value of the field is sent as, `Ecto.Adapters.Tds.Connection.prepare_params/1` passes the tag on as a typed `%Tds.Parameter{}`, and `update/5` and `delete/4` keep comparing such a nil filter with `IS NULL`. Applied to the copy of ecto_sql in [`vendor/ecto_sql`](vendor/ecto_sql) (`git log -p -- vendor/ecto_sql` shows it). All 175 tests in this repo pass with it. |
+| **Upstream PR** | Ready, not submitted. The fix and its tests are in [`upstream/ecto_sql/`](upstream/ecto_sql). On 2026-10-06 they passed on ecto_sql master `f049198`: ecto_sql's full unit suite, its full Tds integration suite against SQL Server 2022, and its compile-without-optional-deps check, with no regressions (the first version of the fix also passed on 2017 and 2019). See the [PR draft](docs/pr-draft.md) and [how to submit it](docs/creating-the-pr.md). |
 
 ## Who is affected
 
@@ -71,11 +71,11 @@ each result:
 
 ```
 Released ecto_sql 3.14.0 (ECTO_SQL=upstream)
-  ok    the bug reproduces: every :bug test fails (50 of 50 failed)
-  ok    every other test passes (0 of 112 failed)
+  ok    the bug reproduces: every :bug test fails (56 of 56 failed)
+  ok    every other test passes (0 of 119 failed)
 
 Vendored ecto_sql with the fix
-  ok    every test passes (0 of 162 failed)
+  ok    every test passes (0 of 175 failed)
 ```
 
 If port 1433 is taken, pick another and pass it to every command, for example
@@ -131,9 +131,9 @@ With the fix, every line reads `works` and it ends with `0 of 10 writes hit the 
 ### Tests
 
 ```sh
-mix test                                   # with the fix: all 162 pass
-ECTO_SQL=upstream mix test --only bug      # released: all 50 fail
-ECTO_SQL=upstream mix test --exclude bug   # released: the other 112 pass
+mix test                                   # with the fix: all 175 pass
+ECTO_SQL=upstream mix test --only bug      # released: all 56 fail
+ECTO_SQL=upstream mix test --exclude bug   # released: the other 119 pass
 ```
 
 Tests tagged `:bug` fail on released ecto_sql and pass with the fix. Everything
@@ -141,7 +141,7 @@ else passes on both.
 
 | File | Covers |
 |---|---|
-| [`dumpers_test.exs`](test/tds_repro/dumpers_test.exs) | How the adapter dumps nil, how the connection prepares the parameter, and how a nil filter is still compared with `IS NULL`, all without a database. |
+| [`dumpers_test.exs`](test/tds_repro/dumpers_test.exs) | How the adapter dumps nil, how the connection prepares the parameter, that a nil gets the parameter type of a value of its field, what `to_sql/3` shows, and how a nil filter is still compared with `IS NULL`, all without querying the database. |
 | [`nil_values_test.exs`](test/tds_repro/nil_values_test.exs) | Writing nil through `Repo.insert`, `Repo.update`, `Repo.insert_all` and `Repo.update_all` for 24 of the 26 field type and column type combinations in [`TdsRepro.AllTypes`](lib/tds_repro/all_types.ex) (25 combinations of built-in types, plus the custom [`TdsRepro.IntDate`](lib/tds_repro/int_date.ex) type on an `int` column; the two `text`/`ntext` combinations are in `known_limitations_test.exs`), plus checks that nothing else changed. |
 | [`known_limitations_test.exs`](test/tds_repro/known_limitations_test.exs) | What the fix doesn't cover, asserted so a change in behaviour is noticed, and why custom types are left alone. |
 | [`workarounds_test.exs`](test/tds_repro/workarounds_test.exs) | What works on released ecto_sql today. |
@@ -155,7 +155,7 @@ Tests use their own `tds_repro_test` database, created and migrated by
 git log -p -- vendor/ecto_sql
 ```
 
-Three commits after the vendoring one:
+Five commits after the vendoring one:
 
 - `4d570f4`, the first version, which built a `%Tds.Parameter{}` in the
   adapter's dumpers.
@@ -166,8 +166,14 @@ Three commits after the vendoring one:
   `IS NULL`. A tagged nil no longer matches their `{field, nil}` clause, so
   without this a guarded `Repo.update/2` compared the column with a NULL
   parameter, matched no rows and raised `Ecto.StaleEntryError`.
+- `cbe5fdf`, which tags the nil with the TDS type a non-nil value of the field
+  is sent as instead of its Ecto type, so the adapter uses up the Ecto type and
+  the connection passes the tag on like `{value, :varchar}`. SQL Server receives
+  the same parameters as before.
+- `aa038c9`, which only corrects the comments: they name the column types that
+  refuse an untyped nil, since the legacy `datetime` columns accept it.
 
-[docs/root-cause.md](docs/root-cause.md#the-fix) explains all three.
+[docs/root-cause.md](docs/root-cause.md#the-fix) explains the result.
 
 ## Verifying the upstream patches
 
@@ -176,16 +182,19 @@ bin/verify-upstream
 ```
 
 It clones ecto_sql master, applies [`upstream/ecto_sql/*.patch`](upstream/ecto_sql),
-and runs the new upstream tests with the fix and without it:
+runs the new upstream tests with the fix and without it, and with the fix runs
+ecto_sql's own `mix test.as_a_dep`, which compiles ecto_sql as a dependency
+without its optional drivers:
 
 ```
 Cloning https://github.com/elixir-ecto/ecto_sql.git
-  at 86234e7 2026-09-19 Fix precedence issue in queries, closes #754
+  at f049198 2026-10-05 Update actions/checkout to v7 and actions/cache to v6 in CI (#757)
   ok    patches apply (2 patches)
 
 With the fix
   ok    unit tests pass (0 of 139 failed)
   ok    integration test passes (0 of 40 failed)
+  ok    compiles as a dependency without tds (mix test.as_a_dep)
 
 Without the fix (lib/ecto/adapters/tds.ex and tds/connection.ex from before the fix commit)
   ok    unit tests fail (4 of 139 failed)
@@ -202,9 +211,11 @@ database named `ecto_test` on your SQL Server. The full results are in the
 tds is an optional dependency of ecto_sql, and `lib/ecto/adapters/tds.ex` is
 compiled in every ecto_sql install, including apps that only use Postgres.
 Unlike the connection module it has no `Code.ensure_loaded?(Tds)` guard, so a
-reference to `Tds.Parameter` in it breaks those apps at compile time. The first
-version of the fix did exactly that. ecto_sql's own test suite always has tds
-available and can't catch it, so this repo checks it directly:
+`%Tds.Parameter{}` struct in it breaks those apps at compile time. The first
+version of the fix did exactly that. ecto_sql's CI runs its test suite with tds
+available and can't catch it. Its `mix test.all` alias would, through
+`mix test.as_a_dep`, which `bin/verify-upstream` runs. This repo also checks the
+vendored adapter directly:
 
 ```sh
 bin/compile-without-tds

@@ -3,7 +3,8 @@
 What has already been tried and said about this bug upstream, and how the fix
 in this repo responds to each point. Read this before the PR draft: most of
 what a reviewer will ask has come up before. Checked against GitHub, Hex and
-the Elixir Forum on 2026-09-15; every link is also in [references.md](references.md).
+the Elixir Forum on 2026-09-15, and against GitHub and Hex again on
+2026-10-06; every link is also in [references.md](references.md).
 
 ## Timeline
 
@@ -26,7 +27,8 @@ the Elixir Forum on 2026-09-15; every link is also in [references.md](references
 | 2024-06-13 | [tds#124](https://github.com/elixir-ecto/tds/issues/124#issuecomment-2165036413) | mjaric: only Option 1 is needed, but asks whether some code paths could drop the type on its way to the driver. In a [second comment](https://github.com/elixir-ecto/tds/issues/124#issuecomment-2166618540) points at `fix_data_type/1` and says a PR will follow. No PR has appeared. |
 | 2025-04-03 | [tds#168](https://github.com/elixir-ecto/tds/issues/168) | jaybarra reports `Repo.insert_all/3` with an explicit nil `utc_datetime` value fails against a `datetime2` column; works around it by dropping nil keys. No comments; labeled `bug` on 2025-06-06. |
 | 2026-02-27 | [tds#183](https://github.com/elixir-ecto/tds/pull/183) | Draft "TDS v3 Internals Redesign" by mjaric. Its [`next`](https://github.com/elixir-ecto/tds/tree/next) branch still declares untyped nils as `:binary`, but still respects an explicit type. |
-| 2026-05 to 2026-09 | Hex, GitHub | Latest releases are ecto_sql 3.14.0 (2026-05-19), ecto 3.14.2 and tds 2.3.8 (2026-05-18). tds's changelog on master lists a v2.4.0 (2026-08-19) that isn't on Hex yet and doesn't touch parameter types. ecto_sql master ([`2385763`](https://github.com/elixir-ecto/ecto_sql/commit/2385763), 2026-09-06) still has the bug. |
+| 2026-05 to 2026-10 | Hex, GitHub | Latest releases are ecto_sql 3.14.0 (2026-05-19), tds 2.3.8 (2026-05-18) and ecto 3.14.2 (2026-08-14). tds's changelog on master lists a v2.4.0 (2026-08-19) that isn't on Hex yet and doesn't touch parameter types. ecto_sql master ([`f049198`](https://github.com/elixir-ecto/ecto_sql/commit/f049198), 2026-10-05) still has the bug. |
+| 2026-09-15 | [tds#124](https://github.com/elixir-ecto/tds/issues/124), [tds#168](https://github.com/elixir-ecto/tds/issues/168) | Both issues show a "referenced" event from this repo's commit `4d570f4`, the first version of the fix, whose message names them. Nobody has commented on either since. |
 
 Both issues are still open, and neither links to a PR.
 
@@ -35,13 +37,13 @@ Both issues are still open, and neither links to a PR.
 | Point raised | By | Response |
 |---|---|---|
 | Setting date/time fields to nil fails, including via `insert_all` | puruzio, enrico, jaybarra | Fixed for every Ecto date/time type, on `Repo.update`, `insert_all` and `update_all`. |
-| The fix may belong in Ecto's adapter, not the driver | mjaric | The change is in ecto_sql: `Ecto.Adapters.Tds.dumpers/2` tags the nil with its Ecto type, and `Ecto.Adapters.Tds.Connection.prepare_params/1` declares the parameter type. |
+| The fix may belong in Ecto's adapter, not the driver | mjaric | The change is in ecto_sql: `Ecto.Adapters.Tds.dumpers/2` tags the nil with the TDS type a non-nil value of the field is sent as, and `Ecto.Adapters.Tds.Connection.prepare_params/1` passes it to the driver as a typed parameter. |
 | Changing the driver's fallback breaks other column types | rschenk, wojtekmach, mjaric | The fallback is untouched. Types other than the built-in date/time and float types, custom types included, dump exactly as before. |
 | `:binary_id` support matters most | mjaric | Unaffected: UUID columns accept nil before and after. |
 | NULL can't be encoded without a type; a hint is required | mjaric | The hint comes from the schema field's Ecto type. Nothing is inferred from the nil. |
-| Calendar types, float, "and potentially others" | wojtekmach | All calendar types and float are fixed. The only other failure found is `:string` fields on legacy `text`/`ntext` columns, which the fix doesn't cover. |
-| Do some code paths drop the type before the driver? | mjaric | Ecto passes every schema-typed value through the adapter's dumpers (since ecto#4214), so updates, `insert_all` and `update_all` all get typed. Values with no type (queries on a table name, `fragment`, raw SQL) still fail, as before. |
-| Don't rely on implicit conversion | mjaric | Date and time nils get the same parameter types ecto_sql already sends for non-nil values of those fields. A nil float is declared `:float`, which the driver declares as `decimal(1,0)`; SQL Server converts that to `float` and `real` implicitly, the one conversion the fix relies on. |
+| Calendar types, float, "and potentially others" | wojtekmach | All calendar types and float are fixed for built-in fields. Still refused, as before: `:string`, `:map` and `Tds.Ecto.VarChar` fields on legacy `text`/`ntext` columns, `:decimal` fields on `float`/`real` columns, custom types with these primitives, and a nil inside `in ^list`. The PR draft lists them under "Not covered". |
+| Do some code paths drop the type before the driver? | mjaric | Ecto passes every schema-typed value through the adapter's dumpers (since ecto#4214), so updates, `insert_all` and `update_all` all get typed. Values with no type (queries on a table name, `fragment`, raw SQL) still fail, as before. One typed path drops the type: Ecto dumps `in ^list` element by element and leaves a nil element bare, so it still goes out untyped (error 402). The adapter could type it with a `dumpers({:in, type}, {:in, type})` clause, but the fix leaves lists alone. |
+| Don't rely on implicit conversion | mjaric | Date and time nils get the same parameter types ecto_sql already sends for non-nil values of those fields. A nil float is tagged `:float`, which the driver declares as `decimal(1,0)`; SQL Server converts that to `float` and `real` implicitly. That is the one conversion the fix relies on that non-nil values of these fields don't already rely on. |
 | `type(^value, :date)` means giving up changesets | abueloshika | Changesets work without it. The fix also makes `type(^nil, :float)` work, which fails today (error 529). |
 | Tests passed without exercising the changed code | rschenk | This repo's tests go through `Ecto.Type.adapter_dump/3` and real `Repo` calls against SQL Server, and the upstream tests do the same. |
 | Driver rewrite in progress | mjaric (tds#183) | Compatible: the rewrite still honors an explicitly typed parameter. |
@@ -61,8 +63,24 @@ the layer that knows it:
 
 - **The mechanism.** Maintainers discussed passing types through Ecto itself
   (the `wm-types` branches). This fix uses the adapter's existing dumper hook
-  instead, which needs no change to Ecto and covers more paths. Nobody
-  upstream has seen this approach yet.
+  instead, which needs no change to Ecto and covers more paths. Upstream has
+  only seen the first version, which built a `%Tds.Parameter{}` in the
+  dumpers, through the "referenced" events on the issues, and nobody has
+  commented on it.
+- **Driver type names in the adapter.** `lib/ecto/adapters/tds.ex` now names
+  five tds parameter types: `:date`, `:time`, `:datetime2`, `:datetimeoffset`
+  and `:float`. tds doesn't document them; `Tds.Parameter` is
+  [`@moduledoc false`](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L2).
+  But `prepare_param/1` already relies on four of them, and the driver itself
+  types a float value `:float`
+  ([parameter.ex#L119-L122](https://github.com/elixir-ecto/tds/blob/f67d0a7cd0/lib/tds/parameter.ex#L119-L122)).
+  The tds v3 redesign on the [`next`](https://github.com/elixir-ecto/tds/tree/next)
+  branch keeps all five
+  ([datetime.ex#L54-L56](https://github.com/elixir-ecto/tds/blob/de6a27311d/lib/tds/type/datetime.ex#L54-L56),
+  [float.ex#L21](https://github.com/elixir-ecto/tds/blob/de6a27311d/lib/tds/type/float.ex#L21)).
+  It drops `:varchar`
+  ([string.ex#L41](https://github.com/elixir-ecto/tds/blob/de6a27311d/lib/tds/type/string.ex#L41)),
+  which only affects the existing `Tds.Ecto.VarChar`.
 - **`text`/`ntext` columns.** Sending a typed string NULL would fix them, but
   it is close to the rejected tds#162 and would break `:string` fields on
   `varbinary` columns. Left out deliberately; Microsoft has also [deprecated](https://learn.microsoft.com/en-us/sql/t-sql/data-types/ntext-text-and-image-transact-sql)
